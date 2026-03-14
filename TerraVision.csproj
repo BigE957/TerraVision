@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- Import tModLoader mod properties -->
+	<Import Project="..\tModLoader.targets" />
+
+	<!-- General -->
+	<PropertyGroup>
+		<AssemblyName>TerraVision</AssemblyName>
+		<LangVersion>latest</LangVersion>
+	</PropertyGroup>
+
+	<!-- References -->
+	<ItemGroup>
+		<Reference Include="lib/**/*.dll" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="LibVLCSharp" Version="3.9.6" />
+		<PackageReference Include="YoutubeExplode" Version="6.5.7" />
+		<PackageReference Include="YoutubeDLSharp" Version="1.2.0" />
+	</ItemGroup>
+
+</Project>

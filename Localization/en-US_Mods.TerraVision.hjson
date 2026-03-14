@@ -1,0 +1,49 @@
+Tiles: {
+	BoxTVTile.MapEntry: Box T V Tile
+	CassettePlayer.MapEntry: Cassette Player
+	FlatscreenTVTile.MapEntry: Flatscreen T V Tile
+}
+
+Items: {
+	TVRemote: {
+		DisplayName: T V Remote
+		Tooltip: ""
+	}
+
+	CordBundle: {
+		DisplayName: Cord Bundle
+		Tooltip: ""
+	}
+
+	BoxTVItem: {
+		DisplayName: Box T V Item
+		Tooltip: ""
+	}
+
+	CassettePlayerItem: {
+		DisplayName: Cassette Player Item
+		Tooltip: ""
+	}
+
+	FlatscreenTVItem: {
+		DisplayName: Flatscreen T V Item
+		Tooltip: ""
+	}
+
+	VideoPlayerOpenerItem: {
+		DisplayName: Video Player Opener Item
+		Tooltip: ""
+	}
+
+	Cassettes: {
+		PortedHimCassette: {
+			DisplayName: Ported Him Cassette
+			Tooltip: ""
+		}
+
+		HubrisCassette: {
+			DisplayName: Hubris Cassette
+			Tooltip: ""
+		}
+	}
+}

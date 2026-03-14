@@ -1,0 +1,4 @@
+displayName = TerraVision: Video Players
+author = Big E
+version = 1.0.0
+dllReferences = LibVLCSharp, YoutubeDLSharp, YoutubeExplode, AngleSharp, Newtonsoft.Json, Microsoft.Bcl.AsyncInterfaces, System.Text.Json, System.IO.Pipelines, System.Text.Encodings.Web
