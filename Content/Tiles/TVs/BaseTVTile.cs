@@ -36,8 +36,7 @@ public abstract class BaseTVTile : ModTile
 
     public override bool RightClick(int i, int j)
     {
-        TVTileEntity tvEntity = TerraVisionUtils.FindTileEntity<TVTileEntity>(
-            i, j, GetTVDimensions().X, GetTVDimensions().Y, 16);
+        TVTileEntity tvEntity = TerraVisionUtils.FindTileEntity<TVTileEntity>(i, j, GetTVDimensions().X, GetTVDimensions().Y, 16);
 
         if (tvEntity == null)
         {
