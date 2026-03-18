@@ -1,159 +1,134 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Graphics;
-using System;
 using System.Collections.Generic;
 using Terraria;
 using Terraria.GameContent;
 
 namespace TerraVision.Core.VideoPlayer.Danmaku;
 
-/// <summary>
-/// A comment currently being displayed on screen.
-/// </summary>
-public class ActiveDanmakuComment
-{
-    public DanmakuComment Source { get; init; }
-
-    /// <summary>Current screen-space position relative to the video rect's top-left.</summary>
-    public float X { get; set; }
-    public float Y { get; set; }
-
-    /// <summary>How long this comment has been visible, in seconds.</summary>
-    public float Age { get; set; }
-
-    /// <summary>Pre-measured text width in pixels at scale 1.0.</summary>
-    public float TextWidth { get; init; }
-
-    /// <summary>Which lane (row) this comment occupies.</summary>
-    public int Lane { get; init; }
-
-    public bool IsExpired(float scrollDuration, float anchorDuration)
-    {
-        float duration = Source.Type == 1 ? scrollDuration : anchorDuration;
-        return Age >= duration;
-    }
-}
-
-/// <summary>
-/// Manages active danmaku comments — lane assignment, movement, and drawing.
-/// </summary>
 public class DanmakuRenderer
 {
-    private readonly List<ActiveDanmakuComment> _active = new();
-
     // How long a scrolling comment takes to cross the screen
     private const float ScrollDuration = 8f;
 
-    // How long anchored (top/bottom) comments stay visible
+    // How long anchored comments stay visible
     private const float AnchorDuration = 5f;
 
-    // Fraction of the video height used for danmaku (avoids covering the whole screen)
+    // Fraction of video height available for danmaku
     private const float ScreenCoverage = 0.85f;
 
-    // Scale of danmaku text relative to Terraria's mouse font
     private const float TextScale = 0.75f;
 
-    // Approximate line height in pixels at TextScale
-    private float LineHeight => FontAssets.MouseText.Value.MeasureString("A").Y * TextScale + 2f;
+    private float LineHeight => FontAssets.MouseText.Value
+        .MeasureString("A").Y * TextScale + 2f;
+
+    // Comments with precomputed lane assignments, set once on load
+    private List<DanmakuComment> _comments = new();
+
+    // -------------------------------------------------------------------------
+    // Lane precomputation — called once when the comment list is fetched
+    // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Call once per frame. Advances comment positions and removes expired ones.
+    /// Assigns lanes to all comments up front so Draw is purely stateless.
+    /// Uses a reference width to determine scroll overlap; scales fine at runtime.
     /// </summary>
-    public void Update(float deltaSeconds, Vector2 videoSize)
+    public void LoadComments(List<DanmakuComment> comments, float referenceWidth = 1280f)
     {
-        float scrollPixelsPerSecond = (videoSize.X * 1.5f) / ScrollDuration;
+        _comments = comments;
 
-        for (int i = _active.Count - 1; i >= 0; i--)
+        float lineHeight = LineHeight;
+        float usableHeight = referenceWidth * 0.5625f * ScreenCoverage; // assume 16:9
+        int maxLanes = (int)(usableHeight / lineHeight);
+
+        // Per-lane, track the video time at which the lane becomes free again
+        var scrollLaneFreeAt = new float[maxLanes];
+        var topLaneFreeAt = new float[maxLanes];
+        var bottomLaneFreeAt = new float[maxLanes];
+
+        var font = FontAssets.MouseText.Value;
+
+        foreach (var comment in _comments)
         {
-            var c = _active[i];
-            c.Age += deltaSeconds;
+            float textWidth = font.MeasureString(comment.Text).X * TextScale;
 
-            if (c.IsExpired(ScrollDuration, AnchorDuration))
+            switch (comment.Type)
             {
-                _active.RemoveAt(i);
-                continue;
+                case 1: // scrolling
+                    {
+                        // A lane is free when the previous comment's tail has cleared
+                        // the right edge, giving the new comment room to enter.
+                        // Since all comments scroll at the same speed, the tail of the
+                        // previous comment clears the right edge when enough time has
+                        // passed for it to travel (referenceWidth + prevTextWidth).
+                        // That takes: (prevTextWidth / (referenceWidth + prevTextWidth)) * ScrollDuration
+                        // after its own appear time. We simplify: lane is free once
+                        // the tail has exited, i.e. prevAppear + ScrollDuration * (prevTextWidth / totalTravel)
+                        // For safety we just require the lane to be free at comment.Time.
+                        int lane = FindFreeLane(scrollLaneFreeAt, comment.Time, maxLanes);
+                        comment.Lane = lane >= 0 ? lane : -1;
+
+                        if (lane >= 0)
+                        {
+                            // Lane stays occupied until the new comment's tail clears the right edge
+                            float totalTravel = referenceWidth + textWidth;
+                            float timeToExit = ScrollDuration * (textWidth / totalTravel);
+                            scrollLaneFreeAt[lane] = comment.Time + timeToExit;
+                        }
+                        break;
+                    }
+                case 5: // top anchored
+                    {
+                        int lane = FindFreeLane(topLaneFreeAt, comment.Time, maxLanes);
+                        comment.Lane = lane >= 0 ? lane : -1;
+                        if (lane >= 0)
+                            topLaneFreeAt[lane] = comment.Time + AnchorDuration;
+                        break;
+                    }
+                case 4: // bottom anchored
+                    {
+                        int lane = FindFreeLane(bottomLaneFreeAt, comment.Time, maxLanes);
+                        comment.Lane = lane >= 0 ? lane : -1;
+                        if (lane >= 0)
+                            bottomLaneFreeAt[lane] = comment.Time + AnchorDuration;
+                        break;
+                    }
             }
-
-            // Scrolling comments move right to left
-            if (c.Source.Type == 1)
-                c.X -= scrollPixelsPerSecond * deltaSeconds;
         }
     }
 
-    /// <summary>
-    /// Activates a new comment, assigning it a lane and starting position.
-    /// Call this from VideoPlayerCore when the comment's timestamp is reached.
-    /// </summary>
-    public void Activate(DanmakuComment comment, Vector2 videoSize)
+    private static int FindFreeLane(float[] laneFreeAt, float commentTime, int maxLanes)
     {
-        float textWidth = FontAssets.MouseText.Value.MeasureString(comment.Text).X * TextScale;
-
-        int lane = AssignLane(comment.Type, textWidth, videoSize);
-        if (lane < 0)
-            return; // all lanes full, drop this comment
-
-        float startX, startY;
-        float usableHeight = videoSize.Y * ScreenCoverage;
-        float laneY = lane * LineHeight;
-
-        switch (comment.Type)
+        for (int i = 0; i < maxLanes; i++)
         {
-            case 1: // scrolling — starts off the right edge
-                startX = videoSize.X;
-                startY = laneY;
-                break;
-            case 4: // bottom anchored — lanes grow upward from the bottom
-                startX = (videoSize.X - textWidth) / 2f;
-                startY = videoSize.Y - (lane + 1) * LineHeight;
-                break;
-            case 5: // top anchored
-            default:
-                startX = (videoSize.X - textWidth) / 2f;
-                startY = laneY;
-                break;
+            if (laneFreeAt[i] <= commentTime)
+                return i;
         }
-
-        _active.Add(new ActiveDanmakuComment
-        {
-            Source = comment,
-            X = startX,
-            Y = startY,
-            Age = 0f,
-            TextWidth = textWidth,
-            Lane = lane
-        });
+        return -1;
     }
 
-    /// <summary>
-    /// Draws all active comments. Call this inside VideoPlayerCore.DrawCore
-    /// after the video texture draw, with position = video rect top-left.
-    /// </summary>
-    public void Draw(SpriteBatch spriteBatch, Vector2 videoPosition, Vector2 videoSize)
+    public void Clear() => _comments.Clear();
+
+    public void Draw(SpriteBatch spriteBatch, Rectangle videoRect, float currentTime)
     {
-        if (_active.Count == 0)
+        if (_comments.Count == 0)
             return;
 
         var font = FontAssets.MouseText.Value;
+        float lineHeight = LineHeight;
         var graphicsDevice = Main.graphics.GraphicsDevice;
 
-        // Save current scissor state
         Rectangle previousScissor = graphicsDevice.ScissorRectangle;
         RasterizerState previousRasterizer = spriteBatch.GraphicsDevice.RasterizerState;
 
-        // Define clipping rect matching the video area exactly
-        Rectangle clipRect = new Rectangle(
-            (int)videoPosition.X,
-            (int)videoPosition.Y,
-            (int)videoSize.X,
-            (int)videoSize.Y
-        );
+        Rectangle clipRect = videoRect;
 
         Vector2[] corners = {
-            new Vector2(clipRect.Left, clipRect.Top),
-            new Vector2(clipRect.Right, clipRect.Top),
-            new Vector2(clipRect.Left, clipRect.Bottom),
-            new Vector2(clipRect.Right, clipRect.Bottom)
+            new(clipRect.Left, clipRect.Top),
+            new(clipRect.Right, clipRect.Top),
+            new(clipRect.Left, clipRect.Bottom),
+            new(clipRect.Right, clipRect.Bottom)
         };
         for (int i = 0; i < 4; i++)
             corners[i] = Vector2.Transform(corners[i], Main.UIScaleMatrix);
@@ -164,96 +139,66 @@ public class DanmakuRenderer
 
         clipRect = new Rectangle((int)min.X, (int)min.Y, (int)(max.X - min.X), (int)(max.Y - min.Y));
 
-        // SpriteBatch must be ended and restarted with RasterizerState.CullNone + ScissorTestEnable
         spriteBatch.End();
 
-        var scissorRasterizer = new RasterizerState { ScissorTestEnable = true };
+        var scissorState = new RasterizerState { ScissorTestEnable = true };
         graphicsDevice.ScissorRectangle = clipRect;
+        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, scissorState, null, Main.UIScaleMatrix);
 
-        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, scissorRasterizer, null, Main.UIScaleMatrix);
-
-        foreach (var c in _active)
+        foreach (var comment in _comments)
         {
-            Vector2 drawPos = videoPosition + new Vector2(c.X, c.Y);
-
-            var color = new Color(
-                (c.Source.Color >> 16) & 0xFF,
-                (c.Source.Color >> 8) & 0xFF,
-                 c.Source.Color & 0xFF
-            );
-
-            float duration = c.Source.Type == 1 ? ScrollDuration : AnchorDuration;
-            float fadeStart = duration * 0.8f;
-            float alpha = c.Age > fadeStart
-                ? 1f - ((c.Age - fadeStart) / (duration - fadeStart))
-                : 1f;
-
-            color *= alpha;
-            Utils.DrawBorderString(spriteBatch, c.Source.Text, drawPos, color, TextScale);
-        }
-
-        // Restore previous spritebatch state
-        spriteBatch.End();
-
-        graphicsDevice.ScissorRectangle = previousScissor;
-
-        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, previousRasterizer, null, Main.UIScaleMatrix);
-    }
-
-    /// <summary>
-    /// Clears all active comments. Call this on seek or video change.
-    /// </summary>
-    public void Clear() => _active.Clear();
-
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Finds the first lane that won't overlap with existing active comments.
-    /// Returns -1 if no lane is available.
-    /// </summary>
-    private int AssignLane(int type, float newTextWidth, Vector2 videoSize)
-    {
-        float usableHeight = videoSize.Y * ScreenCoverage;
-        int maxLanes = (int)(usableHeight / LineHeight);
-
-        for (int lane = 0; lane < maxLanes; lane++)
-        {
-            if (!IsLaneOccupied(lane, type, newTextWidth, videoSize))
-                return lane;
-        }
-
-        return -1;
-    }
-
-    /// <summary>
-    /// Returns true if a comment in the given lane would overlap an existing one.
-    /// </summary>
-    private bool IsLaneOccupied(int lane, int type, float newTextWidth, Vector2 videoSize)
-    {
-        foreach (var c in _active)
-        {
-            if (c.Lane != lane || c.Source.Type != type)
+            if (comment.Lane < 0)
                 continue;
 
-            if (type == 1)
+            float age = currentTime - comment.Time;
+            if (age < 0)
+                continue;
+
+            float duration = comment.Type == 1 ? ScrollDuration : AnchorDuration;
+            if (age > duration)
+                continue;
+
+            float textWidth = font.MeasureString(comment.Text).X * TextScale;
+            float x, y;
+
+            switch (comment.Type)
             {
-                // For scrolling comments, the lane is safe only if the existing comment
-                // has fully entered the screen and won't be caught by the new one.
-                // A new comment starts at videoSize.X and moves left. The existing
-                // comment's right edge is at c.X + c.TextWidth.
-                // The new comment catches up if it's faster — both move at the same speed,
-                // so we just need the existing comment's tail to be fully on screen.
-                bool existingTailOnScreen = (c.X + c.TextWidth) < videoSize.X;
-                if (!existingTailOnScreen)
-                    return true;
+                case 1: // scrolling right to left
+                    {
+                        float totalTravel = videoRect.Width + textWidth;
+                        float progress = age / ScrollDuration;
+                        x = videoRect.Width - progress * totalTravel;
+                        y = comment.Lane * lineHeight;
+                        break;
+                    }
+                case 5: // top anchored
+                    x = (videoRect.Width - textWidth) / 2f;
+                    y = comment.Lane * lineHeight;
+                    break;
+                case 4: // bottom anchored, lanes stack upward
+                    x = (videoRect.Width - textWidth) / 2f;
+                    y = videoRect.Height - (comment.Lane + 1) * lineHeight;
+                    break;
+                default:
+                    continue;
             }
-            else
-            {
-                // Anchored comments: lane is occupied for their full duration
-                return true;
-            }
+
+            // Fade out over the last 20% of the comment's lifetime
+            float fadeStart = duration * 0.8f;
+            float alpha = age > fadeStart
+                ? 1f - ((age - fadeStart) / (duration - fadeStart))
+                : 1f;
+
+            var color = new Color(
+                (comment.Color >> 16) & 0xFF,
+                (comment.Color >> 8) & 0xFF,
+                 comment.Color & 0xFF) * alpha;
+
+            Utils.DrawBorderString(spriteBatch, comment.Text, videoRect.TopLeft() + new Vector2(x, y), color, TextScale);
         }
 
-        return false;
+        spriteBatch.End();
+        graphicsDevice.ScissorRectangle = previousScissor;
+        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, previousRasterizer, null, Main.UIScaleMatrix);
     }
 }

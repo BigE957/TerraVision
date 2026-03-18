@@ -33,6 +33,8 @@ public class DanmakuComment
     /// 5 = top anchored
     /// </summary>
     public int Type { get; init; }
+
+    public int Lane { get; set; } = -1; // assigned by DanmakuRenderer.LoadComments
 }
 
 /// <summary>

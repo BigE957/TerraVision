@@ -67,10 +67,9 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     // Danmaku
     private readonly DanmakuRenderer _danmakuRenderer = new();
     private List<DanmakuComment> _danmakuComments = null;
-    private int _danmakuCursor = 0; // index into sorted comment list
     private string _danmakuSourceUrl = null; // URL we fetched comments for
     private bool _danmakuFetchInProgress = false;
-    private Vector2 _lastDrawSize = new Vector2(1280, 720);
+    private float _danmakuTimer = 0f;
 
     #region Events
 
@@ -498,7 +497,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                 Main.QueueMainThreadAction(() =>
                 {
                     _danmakuComments = comments;
-                    _danmakuCursor = 0;
+                    _danmakuRenderer.LoadComments(comments);
+
                     _danmakuFetchInProgress = false;
                     TerraVision.instance.Logger.Info(
                         $"Danmaku ready: {comments.Count} comments loaded");
@@ -515,8 +515,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     private void ClearDanmaku()
     {
         _danmakuComments = null;
-        _danmakuCursor = 0;
         _danmakuRenderer.Clear();
+        _danmakuTimer = 0f;
     }
 
     /// <summary>
@@ -757,7 +757,10 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     public void ClearVideoQueue() => _videoQueue.Clear();
 
     public void Pause() => _mediaPlayer?.SetPause(true);
-    public void Resume() => _mediaPlayer?.SetPause(false);
+    public void Resume()
+    {
+        _mediaPlayer?.SetPause(false);
+    }
 
     public void Stop()
     {
@@ -787,6 +790,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         {
             _mediaPlayer.Position = Math.Clamp(position, 0f, 1f);
         }
+        _danmakuTimer = GetTimeSeconds();
     }
 
     public void SetVolume(int volume)
@@ -817,7 +821,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     public long GetDuration() => _mediaPlayer?.Length ?? 0;
     public int GetVolume() => _mediaPlayer?.Volume ?? 0;
 
-    public float GetTimeSeconds() => GetPosition() * GetDuration() / 1000f;
+    public float GetTimeSeconds() => _mediaPlayer == null ? 0f : _mediaPlayer.Time / 1000f;
+
 
     #endregion
 
@@ -847,6 +852,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
 
         PlaybackStarted?.Invoke(this, EventArgs.Empty);
 
+        //_danmakuTimer = GetTimeSeconds();
+
         var currentSessionId = _sessionId;
         Task.Run(async () =>
         {
@@ -873,8 +880,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         _isPaused = false;
         _isPreparing = false;
         PlaybackStopped?.Invoke(this, EventArgs.Empty);
-
-        ClearDanmaku();
+        _danmakuTimer = 0f;
     }
 
     private void OnEndReached(object sender, EventArgs e)
@@ -903,8 +909,6 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             _autoAdvanceQueue = false;
             PlaybackEnded?.Invoke(this, EventArgs.Empty);
         }
-
-        ClearDanmaku();
     }
 
     private void OnError(object sender, EventArgs e)
@@ -912,8 +916,6 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         _isPlaying = false;
         _isPreparing = false;
         PlaybackError?.Invoke(this, EventArgs.Empty);
-
-        ClearDanmaku();
     }
 
     private void SetLoadingState(bool loading)
@@ -952,6 +954,9 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
 
         if (!_isPlaying && !_isPaused) return;
 
+        if (!_isPaused)
+            _danmakuTimer += 1 / 60f;
+
         if (_frameHandler.HasNewFrame())
         {
             _textureNeedsUpdate = true;
@@ -966,8 +971,6 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                 _textureNeedsUpdate = false;
             }
         }
-
-        UpdateDanmaku(gameTime);
     }
 
     private void UpdateTexture(byte[] rgbaData, int stride)
@@ -988,33 +991,6 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"Texture update failed: {ex}");
-        }
-    }
-
-    private void UpdateDanmaku(GameTime gameTime)
-    {
-        if (_danmakuComments == null || _danmakuComments.Count == 0)
-            return;
-
-        if (!_isPlaying)
-            return;
-
-        _danmakuRenderer.Update(_isPaused ? 0f : (float)gameTime.ElapsedGameTime.TotalSeconds, _lastDrawSize);
-
-        float currentTime = GetTimeSeconds();
-
-        // Reset cursor on seek backwards
-        if (_danmakuCursor > 0 && _danmakuComments[_danmakuCursor - 1].Time > currentTime)
-        {
-            _danmakuCursor = 0;
-            _danmakuRenderer.Clear();
-        }
-
-        // Activate comments whose time has arrived
-        while (!_isPaused && _danmakuCursor < _danmakuComments.Count && _danmakuComments[_danmakuCursor].Time <= currentTime)
-        {
-            _danmakuRenderer.Activate(_danmakuComments[_danmakuCursor], _lastDrawSize);
-            _danmakuCursor++;
         }
     }
 
@@ -1043,8 +1019,6 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
 
     private void DrawCore(SpriteBatch spriteBatch, Texture2D pixel, Vector2 position, Vector2 size)
     {
-        _lastDrawSize = size; // capture for UpdateDanmaku
-
         Rectangle targetRect = new((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
         Rectangle videoRect = CalculateRenderRectangle(targetRect);
 
@@ -1070,7 +1044,10 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             DrawLoadingSpinner(spriteBatch, pixel, center, spinnerRadius, dotSize);
         }
 
-        _danmakuRenderer.Draw(spriteBatch, videoRect.TopLeft(), videoRect.Size());
+        if (!_isPlaying && !_isPaused) 
+            return;
+
+        _danmakuRenderer.Draw(spriteBatch, videoRect, _danmakuTimer);
     }
 
     private void DrawLoadingSpinner(SpriteBatch spriteBatch, Texture2D pixel, Vector2 center, float radius, float dotSize)
