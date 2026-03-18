@@ -687,7 +687,15 @@ public class VideoChannelManager : ModSystem
             var player = GetChannelPlayer(channelId);
             if (player != null)
             {
-                if (player.IsPlaying || player.IsLoading || player.IsPreparing)
+                if (player.IsPreparing)
+                {
+                    // A search is in progress (started by auto-advance after the previous video
+                    // ended). The TV entity may briefly report no active viewers during the gap
+                    // between videos — don't kill the search mid-flight because of this window.
+                    // The next StopChannelIfUnused call will clean up once the search resolves.
+                    TerraVision.instance.Logger.Debug($"Channel {channelId} is preparing next video, skipping unused stop");
+                }
+                else if (player.IsPlaying || player.IsLoading)
                 {
                     player.Stop();
                     TerraVision.instance.Logger.Info($"Stopped unused channel {channelId}");

@@ -93,7 +93,7 @@ public static class VideoUrlHelper
             "youtube.com", "youtu.be",
             "twitch.tv",
             "vimeo.com",
-            
+
             // Sometimes work (depends on video)
             "twitter.com", "x.com",
             "tiktok.com",
@@ -145,7 +145,8 @@ public static class VideoUrlHelper
     /// </summary>
     public static void CleanupCache()
     {
-        var now = DateTime.Now;
+        // Fix 17: use UtcNow consistently to avoid DST-related comparison bugs.
+        var now = DateTime.UtcNow;
         var keysToRemove = new List<string>();
 
         foreach (var kvp in _urlCache)
@@ -179,6 +180,7 @@ public static class VideoUrlHelper
             return null;
         }
 
+        // Fix 17: UtcNow for all timestamp comparisons.
         if (_urlCache.TryGetValue(url, out var cached))
         {
             if (cached.IsLivestream)
@@ -186,7 +188,7 @@ public static class VideoUrlHelper
                 _urlCache.TryRemove(url, out _);
                 TerraVision.instance.Logger.Debug("Livestream in cache - fetching fresh URL");
             }
-            else if (DateTime.Now - cached.Timestamp < CacheDuration)
+            else if (DateTime.UtcNow - cached.Timestamp < CacheDuration)
             {
                 TerraVision.instance.Logger.Debug("Using cached URL for regular video");
                 return cached.Result;
@@ -208,29 +210,35 @@ public static class VideoUrlHelper
                 return null;
             }
 
-            bool isDownload = url.Contains("bilibili.com"); // expand this if other sites need downloading later
+            // Fix 7: double-check the cache after acquiring the lock. If two requests
+            // for the same URL arrived simultaneously, the first one will have populated
+            // the cache by the time the second one gets here, avoiding a redundant fetch.
+            if (_urlCache.TryGetValue(url, out var cachedAfterLock) &&
+                !cachedAfterLock.IsLivestream &&
+                DateTime.UtcNow - cachedAfterLock.Timestamp < CacheDuration)
+            {
+                TerraVision.instance.Logger.Debug("Using cached URL (populated while waiting for lock)");
+                return cachedAfterLock.Result;
+            }
+
+            bool isDownload = url.Contains("bilibili.com");
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linkedCts.CancelAfter(isDownload ? DownloadTimeout : RequestTimeout);
 
-            bool isLivestream = false;
-            try
-            {
-                isLivestream = await _extractor.IsLivestreamAsync(url, linkedCts.Token);
-                if (isLivestream)
-                    TerraVision.instance.Logger.Info("Detected livestream - using short cache duration");
-            }
-            catch { }
-
+            // Fix 5: removed the separate IsLivestreamAsync call that used to fire here.
+            // That was a full yt-dlp subprocess invocation just to check liveness, followed
+            // immediately by a second invocation inside GetDirectUrlAsync — paying the
+            // startup cost twice for every regular video. HybridVideoExtractor now sets
+            // streamResult.IsLivestream itself when it routes through the yt-dlp live path,
+            // so we can read it off the result instead.
             VideoStreamResult streamResult = await _extractor.GetDirectUrlAsync(url, linkedCts.Token);
 
             if (streamResult != null)
             {
-                streamResult.IsLivestream = isLivestream;
-
-                if (!isLivestream)
+                if (!streamResult.IsLivestream)
                 {
-                    _urlCache[url] = (streamResult, DateTime.Now, false);
+                    _urlCache[url] = (streamResult, DateTime.UtcNow, false);
                     TerraVision.instance.Logger.Debug("Cached URL for regular video");
                 }
                 else

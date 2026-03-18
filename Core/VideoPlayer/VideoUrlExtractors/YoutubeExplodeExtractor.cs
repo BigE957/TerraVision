@@ -4,9 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Terraria;
 using YoutubeExplode;
-using YoutubeExplode.Search;
 
 namespace TerraVision.Core.VideoPlayer.VideoUrlExtractors;
 
@@ -107,132 +105,15 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
             return null;
         }
     }
-    public async Task<string> SearchAsync(string searchQuery, int resultIndex, int maxResults, CancellationToken cancellationToken = default)
+    public Task<string> SearchAsync(string searchQuery, int resultIndex, int maxResults, CancellationToken cancellationToken = default)
     {
-        if (!IsAvailable)
-        {
-            TerraVision.instance.Logger.Warn("YoutubeExplode not available");
-            return null;
-        }
-
-        try
-        {
-            var searchClient = _youtube.Search;
-            var getVideosMethod = searchClient.GetType().GetMethod("GetVideosAsync");
-
-            if (getVideosMethod == null)
-            {
-                TerraVision.instance.Logger.Error("GetVideosAsync method not found");
-                return null;
-            }
-
-            // Invoke GetVideosAsync
-            object searchResultsObj = getVideosMethod.Invoke(searchClient, new object[] { searchQuery, cancellationToken });
-
-            var asyncEnumerableInterface = searchResultsObj.GetType().GetInterfaces()
-                .FirstOrDefault(i => i.Name.Contains("IAsyncEnumerable"));
-
-            if (asyncEnumerableInterface == null)
-            {
-                TerraVision.instance.Logger.Error("IAsyncEnumerable interface not found");
-                return null;
-            }
-
-            var getEnumeratorMethod = asyncEnumerableInterface.GetMethod("GetAsyncEnumerator");
-            if (getEnumeratorMethod == null)
-            {
-                TerraVision.instance.Logger.Error("GetAsyncEnumerator not found");
-                return null;
-            }
-
-            object enumeratorObj = getEnumeratorMethod.Invoke(searchResultsObj, new object[] { cancellationToken });
-
-            var asyncEnumeratorInterface = enumeratorObj.GetType().GetInterfaces()
-                .FirstOrDefault(i => i.Name.Contains("IAsyncEnumerator"));
-
-            if (asyncEnumeratorInterface == null)
-            {
-                TerraVision.instance.Logger.Error("IAsyncEnumerator interface not found");
-                return null;
-            }
-
-            var moveNextMethod = asyncEnumeratorInterface.GetMethod("MoveNextAsync");
-            var currentProperty = asyncEnumeratorInterface.GetProperty("Current");
-
-            if (moveNextMethod == null || currentProperty == null)
-            {
-                TerraVision.instance.Logger.Error("MoveNextAsync or Current not found");
-                return null;
-            }
-
-            try
-            {
-                List<VideoSearchResult> results = new List<VideoSearchResult>();
-                int fetchLimit = resultIndex >= 0 ? resultIndex + 1 : maxResults;
-
-                while (results.Count < fetchLimit)
-                {
-                    dynamic moveNextTask = moveNextMethod.Invoke(enumeratorObj, null);
-                    bool hasResult = await moveNextTask;
-
-                    if (!hasResult)
-                        break;
-
-                    VideoSearchResult video = (VideoSearchResult)currentProperty.GetValue(enumeratorObj);
-                    results.Add(video);
-                }
-
-                if (results.Count == 0)
-                {
-                    TerraVision.instance.Logger.Warn("YoutubeExplode search: No results found");
-                    return null;
-                }
-
-                VideoSearchResult selectedVideo;
-                if (resultIndex == -1)
-                {
-                    selectedVideo = results[Main.rand.Next(results.Count)];
-                }
-                else if (resultIndex >= results.Count)
-                {
-                    selectedVideo = results[results.Count - 1];
-                }
-                else
-                {
-                    selectedVideo = results[resultIndex];
-                }
-
-                string videoUrl = $"https://youtube.com/watch?v={selectedVideo.Id}";
-                TerraVision.instance.Logger.Info($"YoutubeExplode search found: {selectedVideo.Title}");
-                return videoUrl;
-            }
-            finally
-            {
-                // Dispose the enumerator
-                var asyncDisposableInterface = enumeratorObj.GetType().GetInterfaces()
-                    .FirstOrDefault(i => i.Name.Contains("IAsyncDisposable"));
-
-                if (asyncDisposableInterface != null)
-                {
-                    var disposeMethod = asyncDisposableInterface.GetMethod("DisposeAsync");
-                    if (disposeMethod != null)
-                    {
-                        dynamic disposeTask = disposeMethod.Invoke(enumeratorObj, null);
-                        await disposeTask;
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            TerraVision.instance.Logger.Info("YoutubeExplode search cancelled");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            TerraVision.instance.Logger.Error($"YoutubeExplode search failed: {ex.Message}");
-            return null;
-        }
+        // YoutubeExplode's SearchAsync returns IAsyncEnumerable<T>, whose internal async
+        // iterator state machines trigger JIT compilation failures in Terraria's runtime.
+        // There is no safe way to call this API in this environment — even reflection-based
+        // invocation still causes the JIT to compile YoutubeExplode's own state machines
+        // the moment the enumerator is advanced. Returning null here lets HybridVideoExtractor
+        // fall through to yt-dlp, which handles search reliably.
+        return Task.FromResult<string>(null);
     }
 
     public async Task<List<string>> GetPlaylistVideosAsync(string playlistId, CancellationToken cancellationToken = default)
@@ -295,4 +176,3 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
         return Task.FromResult(false);
     }
 }
-

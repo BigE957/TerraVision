@@ -110,8 +110,10 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
         }
 
-        // Strategy 1.5: Quick livestream check if yt-dlp is available
-        // This catches livestreams with normal /watch URLs
+        // Strategy 1.5: Quick livestream check if yt-dlp is available.
+        // This catches livestreams with normal /watch URLs.
+        // Fix 5: When confirmed live, flag the result so VideoUrlHelper can skip its own
+        // redundant IsLivestreamAsync call and apply the correct (short) cache duration.
         if (_ytdlp.IsAvailable)
         {
             try
@@ -120,7 +122,10 @@ public class HybridVideoExtractor : IVideoUrlExtractor
                 if (isLive)
                 {
                     TerraVision.instance.Logger.Info("Livestream detected by metadata check, using yt-dlp");
-                    return await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
+                    VideoStreamResult liveResult = await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
+                    if (liveResult != null)
+                        liveResult.IsLivestream = true;
+                    return liveResult;
                 }
             }
             catch
@@ -224,12 +229,10 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // User cancelled, propagate
                 throw;
             }
             catch (OperationCanceledException)
             {
-                // Timeout, try fallback - use Debug level
                 TerraVision.instance.Logger.Debug("YoutubeExplode search timed out, trying yt-dlp fallback");
             }
             catch (Exception ex)
@@ -276,7 +279,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             {
                 TerraVision.instance.Logger.Info($"Fetching playlist with YoutubeExplode (fast method): {playlistId}");
 
-                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20)); // Playlists may take longer
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
                 var result = await _youtubeExplode.GetPlaylistVideosAsync(playlistId, linkedCts.Token);
@@ -289,12 +292,10 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // User cancelled, propagate
                 throw;
             }
             catch (OperationCanceledException)
             {
-                // Timeout, try fallback - use Debug level
                 TerraVision.instance.Logger.Debug("YoutubeExplode playlist fetch timed out, trying yt-dlp fallback");
             }
             catch (Exception ex)

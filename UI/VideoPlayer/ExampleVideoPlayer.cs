@@ -387,7 +387,7 @@ public class ExampleVideoPlayerUI : UIState
         {
             _videoPlayer.Stop();
             _videoPlayer?.Dispose();
-            TerraVision.instance.Logger.Info("Player disposed in OnClose");
+            ModContent.GetInstance<TerraVision>().Logger.Info("Player disposed in OnClose");
         }
 
         _urlInput?.Deselect();

@@ -15,12 +15,13 @@ namespace TerraVision.Core.VideoPlayer.VideoUrlExtractors;
 
 /// <summary>
 /// Video URL extractor using yt-dlp.
-/// Supports livestreams and is highly reliable.
+/// Supports livestreams.
 /// </summary>
 public class YtDlExtractor : IVideoUrlExtractor
 {
     private YoutubeDL _ytdl;
-    private string _ytdlpPath;
+    private static string _ytdlpPath;
+    public static string GetYtDlpPath() => _ytdlpPath;
     public string FfmpegPath => File.Exists(_ffmpegPath) ? _ffmpegPath : null;
 
     private string _ffmpegPath;
@@ -42,7 +43,7 @@ public class YtDlExtractor : IVideoUrlExtractor
         Directory.CreateDirectory(ytdlpFolder);
 
         _ytdlpPath = Path.Combine(ytdlpFolder, GetBinaryName());
-        _ffmpegPath = Path.Combine(Path.Combine(ModLoader.ModPath, "..", "yt-dlp"), "ffmpeg.exe");
+        _ffmpegPath = Path.Combine(ytdlpFolder, GetFfmpegBinaryName());
     }
 
     private static string GetBinaryName()
@@ -50,6 +51,13 @@ public class YtDlExtractor : IVideoUrlExtractor
         return Environment.OSVersion.Platform == PlatformID.Win32NT
             ? "yt-dlp.exe"
             : "yt-dlp";
+    }
+
+    private static string GetFfmpegBinaryName()
+    {
+        return Environment.OSVersion.Platform == PlatformID.Win32NT
+            ? "ffmpeg.exe"
+            : "ffmpeg";
     }
 
     public async Task<bool> InitializeAsync()
@@ -91,7 +99,7 @@ public class YtDlExtractor : IVideoUrlExtractor
                         }
                     };
                     process.Start();
-                    process.WaitForExit();
+                    await process.WaitForExitAsync();
                 }
                 catch (Exception ex)
                 {
@@ -104,8 +112,6 @@ public class YtDlExtractor : IVideoUrlExtractor
             _ytdl.YoutubeDLPath = _ytdlpPath;
             _ytdl.OutputFolder = Path.GetTempPath();
 
-            // Test if it works
-            var version = await _ytdl.RunUpdate();
             TerraVision.instance.Logger.Info($"yt-dlp initialized successfully");
 
             if (!File.Exists(_ffmpegPath))
@@ -138,14 +144,90 @@ public class YtDlExtractor : IVideoUrlExtractor
     {
         try
         {
-            // yt-dlp maintains their own ffmpeg builds — single exe, no zip needed
+            bool isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+            if (isWindows)
+            {
+                return await DownloadFfmpegWindowsAsync();
+            }
+            else
+            {
+                // On Linux/Mac, prefer the system ffmpeg to avoid downloading a large archive.
+                // If it's on PATH, just point to it directly.
+                string systemFfmpeg = await FindSystemFfmpegAsync();
+                if (systemFfmpeg != null)
+                {
+                    // Symlink or copy the system binary path into our expected location
+                    // by writing a tiny shell wrapper so _ffmpegPath is a valid executable.
+                    await File.WriteAllTextAsync(_ffmpegPath, $"#!/bin/sh\nexec \"{systemFfmpeg}\" \"$@\"\n");
+                    var chmod = new System.Diagnostics.Process
+                    {
+                        StartInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "chmod",
+                            Arguments = $"+x \"{_ffmpegPath}\"",
+                            UseShellExecute = false
+                        }
+                    };
+                    chmod.Start();
+                    await chmod.WaitForExitAsync();
+                    TerraVision.instance.Logger.Info($"Using system ffmpeg at: {systemFfmpeg}");
+                    return true;
+                }
+
+                return await DownloadFfmpegLinuxAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            TerraVision.instance.Logger.Error($"ffmpeg download failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Returns the path to a system ffmpeg if one is on PATH, otherwise null.</summary>
+    private static async Task<string> FindSystemFfmpegAsync()
+    {
+        try
+        {
+            var tcs = new TaskCompletionSource<string>();
+            var output = new System.Text.StringBuilder();
+
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "which",
+                    Arguments = "ffmpeg",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true
+                },
+                EnableRaisingEvents = true
+            };
+
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
+            process.Exited += (_, _) => { process.WaitForExit(); tcs.TrySetResult(output.ToString().Trim()); process.Dispose(); };
+            process.Start();
+            process.BeginOutputReadLine();
+
+            string result = await tcs.Task;
+            return string.IsNullOrWhiteSpace(result) ? null : result;
+        }
+        catch { return null; }
+    }
+
+    private async Task<bool> DownloadFfmpegWindowsAsync()
+    {
+        try
+        {
             const string url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromMinutes(5);
             httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("TerraVision Mod");
 
-            TerraVision.instance.Logger.Info("Downloading ffmpeg...");
+            TerraVision.instance.Logger.Info("Downloading ffmpeg (Windows)...");
             var response = await httpClient.GetAsync(url);
             response.EnsureSuccessStatusCode();
 
@@ -157,9 +239,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             Directory.CreateDirectory(tempExtract);
             System.IO.Compression.ZipFile.ExtractToDirectory(tempZip, tempExtract);
 
-            // Find ffmpeg.exe in the extracted folder (it's nested inside a bin/ subfolder)
             string extracted = Directory.GetFiles(tempExtract, "ffmpeg.exe", SearchOption.AllDirectories).FirstOrDefault();
-
             if (extracted == null)
             {
                 TerraVision.instance.Logger.Error("ffmpeg.exe not found in downloaded zip");
@@ -167,15 +247,81 @@ public class YtDlExtractor : IVideoUrlExtractor
             }
 
             File.Move(extracted, _ffmpegPath, true);
-
             try { Directory.Delete(tempExtract, true); } catch { }
             try { File.Delete(tempZip); } catch { }
-
             return true;
         }
         catch (Exception ex)
         {
-            TerraVision.instance.Logger.Error($"ffmpeg download failed: {ex.Message}");
+            TerraVision.instance.Logger.Error($"ffmpeg Windows download failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<bool> DownloadFfmpegLinuxAsync()
+    {
+        try
+        {
+            const string url = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz";
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(5);
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("TerraVision Mod");
+
+            TerraVision.instance.Logger.Info("Downloading ffmpeg (Linux)...");
+            var response = await httpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+
+            string tempArchive = Path.Combine(Path.GetTempPath(), "ffmpeg_temp.tar.xz");
+            string tempExtract = Path.Combine(Path.GetTempPath(), "ffmpeg_extract_" + Guid.NewGuid());
+            Directory.CreateDirectory(tempExtract);
+
+            await File.WriteAllBytesAsync(tempArchive, await response.Content.ReadAsByteArrayAsync());
+
+            // Use system tar to extract — available on all Linux/Mac systems
+            var tar = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "tar",
+                    Arguments = $"-xf \"{tempArchive}\" -C \"{tempExtract}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            tar.Start();
+            await tar.WaitForExitAsync();
+
+            string extracted = Directory.GetFiles(tempExtract, "ffmpeg", SearchOption.AllDirectories)
+                .FirstOrDefault(f => !f.EndsWith(".so") && !Path.GetFileName(f).Contains('.'));
+
+            if (extracted == null)
+            {
+                TerraVision.instance.Logger.Error("ffmpeg binary not found in downloaded archive");
+                return false;
+            }
+
+            File.Move(extracted, _ffmpegPath, true);
+
+            var chmod = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "chmod",
+                    Arguments = $"+x \"{_ffmpegPath}\"",
+                    UseShellExecute = false
+                }
+            };
+            chmod.Start();
+            await chmod.WaitForExitAsync();
+
+            try { Directory.Delete(tempExtract, true); } catch { }
+            try { File.Delete(tempArchive); } catch { }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TerraVision.instance.Logger.Error($"ffmpeg Linux download failed: {ex.Message}");
             return false;
         }
     }
@@ -298,6 +444,7 @@ public class YtDlExtractor : IVideoUrlExtractor
     {
         try
         {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var tcs = new TaskCompletionSource<string>();
             var output = new System.Text.StringBuilder();
 
@@ -327,7 +474,14 @@ public class YtDlExtractor : IVideoUrlExtractor
             process.Start();
             process.BeginOutputReadLine();
 
-            return await tcs.Task;
+            using (timeoutCts.Token.Register(() =>
+            {
+                try { process.Kill(); } catch { }
+                tcs.TrySetCanceled();
+            }))
+            {
+                return await tcs.Task;
+            }
         }
         catch
         {
@@ -450,7 +604,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             return null;
         }
     }
-    
+
     public async Task<string> SearchAsync(string searchQuery, int resultIndex, int maxResults, CancellationToken cancellationToken = default)
     {
         if (!IsAvailable)
@@ -461,28 +615,33 @@ public class YtDlExtractor : IVideoUrlExtractor
 
         try
         {
-            // Use yt-dlp to search YouTube
-            var options = new OptionSet()
-            {
-                FlatPlaylist = true,
-                SkipDownload = true
-            };
-            options.AddCustomOption("--get-id", "");
+            // Use RunRawProcessAsync directly rather than _ytdl.RunVideoPlaylistDownload.
+            // The YtdlSharp wrapper unconditionally appends download-oriented flags
+            // (--external-downloader, -f bestvideo+bestaudio, --print after_move:outfile, etc.)
+            // that are meaningless and harmful for a metadata-only search query.
+            // A clean flat-playlist search only needs:
+            //   --flat-playlist   skip per-video metadata fetch, just enumerate IDs
+            //   --print %(id)s    emit one bare video ID per line, nothing else
+            //   --no-warnings     suppress stderr noise that could bleed into output
+            string escapedQuery = searchQuery.Replace("\"", "\\\"");
+            string args = $"--flat-playlist --print \"%(id)s\" --no-warnings --ignore-config -- \"ytsearch{maxResults}:{escapedQuery}\"";
 
-            // Search and get video IDs
-            var result = await _ytdl.RunVideoPlaylistDownload(
-                $"ytsearch{maxResults}:{searchQuery}",
-                ct: cancellationToken,
-                overrideOptions: options
-            );
+            string rawOutput = await RunRawProcessAsync(_ytdlpPath, args, cancellationToken);
 
-            if (!result.Success || result.Data == null || result.Data.Length == 0)
+            var videoResults = rawOutput?
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0
+                    && !line.StartsWith("[")
+                    && !line.StartsWith("WARNING")
+                    && !line.StartsWith("ERROR"))
+                .ToArray();
+
+            if (videoResults == null || videoResults.Length == 0)
             {
                 TerraVision.instance.Logger.Warn("yt-dlp search returned no results");
                 return null;
             }
-
-            var videoResults = result.Data;
 
             // Select based on index
             int selectedIndex;
@@ -499,28 +658,11 @@ public class YtDlExtractor : IVideoUrlExtractor
                 selectedIndex = resultIndex;
             }
 
-            string videoIdOrUrl = videoResults[selectedIndex];
-
-            // Check if it's already a full URL or just an ID
-            string videoUrl;
-            if (videoIdOrUrl.StartsWith("http"))
-            {
-                // It's already a URL, extract the ID
-                var match = System.Text.RegularExpressions.Regex.Match(videoIdOrUrl, @"[?&]v=([^&]+)");
-                if (match.Success)
-                {
-                    videoUrl = $"https://youtube.com/watch?v={match.Groups[1].Value}";
-                }
-                else
-                {
-                    videoUrl = videoIdOrUrl; // Use as-is
-                }
-            }
-            else
-            {
-                // It's just an ID
-                videoUrl = $"https://youtube.com/watch?v={videoIdOrUrl}";
-            }
+            // %(id)s always emits a bare video ID, never a full URL
+            string videoId = videoResults[selectedIndex];
+            string videoUrl = videoId.StartsWith("http")
+                ? videoId
+                : $"https://youtube.com/watch?v={videoId}";
 
             TerraVision.instance.Logger.Info($"yt-dlp search found video: {videoUrl}");
             return videoUrl;
