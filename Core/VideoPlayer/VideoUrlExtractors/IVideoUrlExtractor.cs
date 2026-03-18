@@ -36,7 +36,7 @@ public interface IVideoUrlExtractor
     /// <param name="url">YouTube video URL</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Direct stream URL, or null if extraction fails</returns>
-    Task<string> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default);
+    Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Search YouTube and return the URL of a specific result.

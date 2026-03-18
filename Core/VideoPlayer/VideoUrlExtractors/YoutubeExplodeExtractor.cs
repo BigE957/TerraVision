@@ -40,7 +40,7 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
         }
     }
 
-    public async Task<string> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
+    public async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsAvailable)
         {
@@ -52,7 +52,7 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
         {
             var streamManifest = await _youtube.Videos.Streams.GetManifestAsync(url, cancellationToken);
 
-            // Try muxed streams first (video + audio)
+            // Muxed streams are simplest — video and audio in one URL
             var muxedStream = streamManifest
                 .GetMuxedStreams()
                 .OrderByDescending(s => s.VideoQuality.MaxHeight)
@@ -60,35 +60,40 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
 
             if (muxedStream != null)
             {
-                TerraVision.instance.Logger.Info($"YoutubeExplode found muxed stream: {muxedStream.VideoQuality.Label}");
-                return muxedStream.Url;
+                TerraVision.instance.Logger.Info($"YoutubeExplode: muxed stream {muxedStream.VideoQuality.Label}");
+                return new VideoStreamResult { VideoUrl = muxedStream.Url };
             }
 
-            // Fallback to video-only
+            // No muxed stream — try separate video + audio (DASH)
             var videoStream = streamManifest
                 .GetVideoOnlyStreams()
                 .OrderByDescending(s => s.VideoQuality.MaxHeight)
                 .FirstOrDefault();
 
-            if (videoStream != null)
-            {
-                TerraVision.instance.Logger.Warn("YoutubeExplode: Only video-only stream available (no audio)");
-                return videoStream.Url;
-            }
-
-            // Last resort: audio-only
             var audioStream = streamManifest
                 .GetAudioOnlyStreams()
                 .OrderByDescending(s => s.Bitrate)
                 .FirstOrDefault();
 
-            if (audioStream != null)
+            if (videoStream != null)
             {
-                TerraVision.instance.Logger.Warn("YoutubeExplode: Only audio-only stream available (no video)");
-                return audioStream.Url;
+                TerraVision.instance.Logger.Info($"YoutubeExplode: DASH video={videoStream.VideoQuality.Label}" +
+                    (audioStream != null ? $" + audio" : " (no audio)"));
+                return new VideoStreamResult
+                {
+                    VideoUrl = videoStream.Url,
+                    AudioUrl = audioStream?.Url
+                };
             }
 
-            TerraVision.instance.Logger.Error("YoutubeExplode: No suitable streams found");
+            // Last resort: audio only
+            if (audioStream != null)
+            {
+                TerraVision.instance.Logger.Warn("YoutubeExplode: audio-only stream (no video)");
+                return new VideoStreamResult { VideoUrl = audioStream.Url };
+            }
+
+            TerraVision.instance.Logger.Error("YoutubeExplode: no suitable streams found");
             return null;
         }
         catch (OperationCanceledException)
@@ -102,7 +107,6 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
             return null;
         }
     }
-
     public async Task<string> SearchAsync(string searchQuery, int resultIndex, int maxResults, CancellationToken cancellationToken = default)
     {
         if (!IsAvailable)

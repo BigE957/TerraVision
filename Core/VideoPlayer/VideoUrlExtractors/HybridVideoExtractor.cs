@@ -11,21 +11,22 @@ namespace TerraVision.Core.VideoPlayer.VideoUrlExtractors;
 /// </summary>
 public class HybridVideoExtractor : IVideoUrlExtractor
 {
-    private readonly YtDlpExtractor _ytdlp;
+    private readonly YtDlExtractor _ytdlp;
     private readonly YoutubeExplodeExtractor _youtubeExplode;
+
     private bool _isInitialized = false;
 
     // Timeout for fast method before falling back
     private static readonly TimeSpan FastMethodTimeout = TimeSpan.FromSeconds(10);
 
-    public string Name => "Hybrid (yt-dlp + YoutubeExplode)";
+    public string Name => "Hybrid";
     public bool SupportsLivestreams => _ytdlp.IsAvailable; // Only if yt-dlp is available
     public bool IsAvailable => _ytdlp.IsAvailable || _youtubeExplode.IsAvailable;
 
     public HybridVideoExtractor()
     {
-        _ytdlp = new YtDlpExtractor();
-        _youtubeExplode = new YoutubeExplodeExtractor();
+        _ytdlp = new();
+        _youtubeExplode = new();
     }
 
     public async Task<bool> InitializeAsync()
@@ -35,18 +36,12 @@ public class HybridVideoExtractor : IVideoUrlExtractor
 
         TerraVision.instance.Logger.Info("Initializing hybrid video extractor...");
 
-        // Try to initialize yt-dlp first (needed for livestreams)
         bool ytdlpSuccess = await _ytdlp.InitializeAsync();
         if (ytdlpSuccess)
-        {
             TerraVision.instance.Logger.Info("yt-dlp initialized successfully - livestream support enabled");
-        }
         else
-        {
             TerraVision.instance.Logger.Warn("yt-dlp initialization failed - livestream support disabled");
-        }
 
-        // Always initialize YoutubeExplode as primary for regular videos
         bool explodeSuccess = await _youtubeExplode.InitializeAsync();
         if (!explodeSuccess && !ytdlpSuccess)
         {
@@ -59,11 +54,31 @@ public class HybridVideoExtractor : IVideoUrlExtractor
         return true;
     }
 
-    public async Task<string> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
+    public async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsAvailable)
         {
             TerraVision.instance.Logger.Error("No video extractors available");
+            return null;
+        }
+
+        bool isBilibili = url.Contains("bilibili.com");
+
+        if (isBilibili)
+        {
+            if (_ytdlp.IsAvailable)
+            {
+                TerraVision.instance.Logger.Info("Bilibili URL — downloading and merging via yt-dlp");
+                string localPath = await _ytdlp.DownloadToTempAsync(url, cancellationToken);
+                if (localPath != null)
+                    return new VideoStreamResult { VideoUrl = localPath };
+
+                TerraVision.instance.Logger.Error("yt-dlp download failed for Bilibili");
+            }
+            else
+            {
+                TerraVision.instance.Logger.Error("yt-dlp not available for Bilibili URL");
+            }
             return null;
         }
 
@@ -125,7 +140,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
                 using var timeoutCts = new CancellationTokenSource(FastMethodTimeout);
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
-                string result = await _youtubeExplode.GetDirectUrlAsync(url, linkedCts.Token);
+                VideoStreamResult result = await _youtubeExplode.GetDirectUrlAsync(url, linkedCts.Token);
                 if (result != null)
                 {
                     TerraVision.instance.Logger.Info("YoutubeExplode extraction successful");
@@ -164,7 +179,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             try
             {
                 TerraVision.instance.Logger.Info("Attempting URL extraction with yt-dlp (fallback)...");
-                string result = await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
+                VideoStreamResult result = await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
                 if (result != null)
                 {
                     TerraVision.instance.Logger.Info("yt-dlp extraction successful");

@@ -14,13 +14,14 @@ namespace TerraVision.Core.VideoPlayer;
 
 public static class VideoUrlHelper
 {
-    private static readonly ConcurrentDictionary<string, (string Url, DateTime Timestamp, bool IsLivestream)> _urlCache = new();
+    private static readonly ConcurrentDictionary<string, (VideoStreamResult Result, DateTime Timestamp, bool IsLivestream)> _urlCache = new();
     private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeRequests = new();
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan LivestreamCacheDuration = TimeSpan.FromMinutes(2); // Livestream URLs expire quickly
     private static readonly SemaphoreSlim _requestLock = new(1, 1);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan SemaphoreTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(5);
 
     // Hybrid extractor (yt-dlp + YoutubeExplode)
     private static HybridVideoExtractor _extractor;
@@ -97,8 +98,7 @@ public static class VideoUrlHelper
             "twitter.com", "x.com",
             "tiktok.com",
             "reddit.com",
-            "dailymotion.com",
-            "facebook.com", "fb.watch",
+            "bilibili.com",
         };
 
         string lowerUrl = url.ToLower();
@@ -169,9 +169,9 @@ public static class VideoUrlHelper
     }
 
     /// <summary>
-    /// Get direct stream URL from YouTube URL.
+    /// Get direct stream URL from a URL.
     /// </summary>
-    public static async Task<string> GetDirectUrlFromYouTubeAsync(string youtubeUrl, CancellationToken cancellationToken = default)
+    public static async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
         {
@@ -179,24 +179,21 @@ public static class VideoUrlHelper
             return null;
         }
 
-        // Check cache first (but never cache livestreams - their URLs expire too quickly)
-        if (_urlCache.TryGetValue(youtubeUrl, out var cached))
+        if (_urlCache.TryGetValue(url, out var cached))
         {
-            // Skip cache for livestreams - always fetch fresh
             if (cached.IsLivestream)
             {
-                _urlCache.TryRemove(youtubeUrl, out _);
-                TerraVision.instance.Logger.Debug("Livestream detected in cache - fetching fresh URL");
+                _urlCache.TryRemove(url, out _);
+                TerraVision.instance.Logger.Debug("Livestream in cache - fetching fresh URL");
             }
             else if (DateTime.Now - cached.Timestamp < CacheDuration)
             {
                 TerraVision.instance.Logger.Debug("Using cached URL for regular video");
-                return cached.Url;
+                return cached.Result;
             }
             else
             {
-                // Expired, remove from cache
-                _urlCache.TryRemove(youtubeUrl, out _);
+                _urlCache.TryRemove(url, out _);
                 TerraVision.instance.Logger.Debug("Cached URL expired, fetching new one");
             }
         }
@@ -211,64 +208,57 @@ public static class VideoUrlHelper
                 return null;
             }
 
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(RequestTimeout);
+            bool isDownload = url.Contains("bilibili.com"); // expand this if other sites need downloading later
 
-            // Check if it's a livestream first
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linkedCts.CancelAfter(isDownload ? DownloadTimeout : RequestTimeout);
+
             bool isLivestream = false;
             try
             {
-                isLivestream = await _extractor.IsLivestreamAsync(youtubeUrl, linkedCts.Token);
+                isLivestream = await _extractor.IsLivestreamAsync(url, linkedCts.Token);
                 if (isLivestream)
-                {
                     TerraVision.instance.Logger.Info("Detected livestream - using short cache duration");
-                }
             }
-            catch
-            {
-                // If check fails, assume not a livestream
-            }
+            catch { }
 
-            string directUrl = await _extractor.GetDirectUrlAsync(youtubeUrl, linkedCts.Token);
+            VideoStreamResult streamResult = await _extractor.GetDirectUrlAsync(url, linkedCts.Token);
 
-            // Cache the result - but NOT for livestreams (their URLs expire too quickly)
-            if (directUrl != null)
+            if (streamResult != null)
             {
-                if (isLivestream)
+                streamResult.IsLivestream = isLivestream;
+
+                if (!isLivestream)
                 {
-                    TerraVision.instance.Logger.Debug("Livestream URL not cached (expires too quickly)");
-                    // Don't cache livestreams at all
+                    _urlCache[url] = (streamResult, DateTime.Now, false);
+                    TerraVision.instance.Logger.Debug("Cached URL for regular video");
                 }
                 else
                 {
-                    _urlCache[youtubeUrl] = (directUrl, DateTime.Now, isLivestream);
-                    TerraVision.instance.Logger.Debug("Cached URL for regular video");
+                    TerraVision.instance.Logger.Debug("Livestream URL not cached (expires too quickly)");
                 }
             }
 
-            return directUrl;
+            return streamResult;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            TerraVision.instance.Logger.Info("YouTube URL extraction cancelled by user");
+            TerraVision.instance.Logger.Info("URL extraction cancelled by user");
             throw;
         }
         catch (OperationCanceledException)
         {
-            TerraVision.instance.Logger.Error("YouTube URL extraction timed out");
+            TerraVision.instance.Logger.Error("URL extraction timed out");
             return null;
         }
         catch (Exception ex)
         {
-            TerraVision.instance.Logger.Error($"YouTube URL extraction failed: {ex.Message}");
+            TerraVision.instance.Logger.Error($"URL extraction failed: {ex.Message}");
             return null;
         }
         finally
         {
-            if (lockAcquired)
-            {
-                _requestLock.Release();
-            }
+            if (lockAcquired) _requestLock.Release();
         }
     }
 
@@ -360,26 +350,23 @@ public static class VideoUrlHelper
     /// Process a URL asynchronously.
     /// Supports YouTube, Twitch, Vimeo, and many other platforms via yt-dlp.
     /// </summary>
-    public static void ProcessUrlAsync(string url, Action<string> onComplete, Guid requestId)
+    public static void ProcessUrlAsync(string url, Action<VideoStreamResult> onComplete, Guid requestId)
     {
         if (IsSupportedVideoUrl(url))
         {
-            // Determine the platform for better user feedback
             string platform = "video";
-            if (IsYouTubeUrl(url))
-                platform = "YouTube";
-            else if (url.Contains("twitch.tv"))
-                platform = "Twitch";
-            else if (url.Contains("vimeo.com"))
-                platform = "Vimeo";
-            else if (url.Contains("tiktok.com"))
-                platform = "TikTok";
-            else if (url.Contains("twitter.com") || url.Contains("x.com"))
-                platform = "Twitter";
-            else if (url.Contains("reddit.com"))
-                platform = "Reddit";
+            if (IsYouTubeUrl(url)) platform = "YouTube";
+            else if (url.Contains("twitch.tv")) platform = "Twitch";
+            else if (url.Contains("vimeo.com")) platform = "Vimeo";
+            else if (url.Contains("tiktok.com")) platform = "TikTok";
+            else if (url.Contains("twitter.com") || url.Contains("x.com")) platform = "Twitter";
+            else if (url.Contains("reddit.com")) platform = "Reddit";
+            else if (url.Contains("bilibili.com")) platform = "Bilibili";
 
-            Main.NewText($"Extracting {platform} stream URL...", Color.LightBlue);
+            if (platform == "Bilibili")
+                Main.NewText("Downloading Bilibili video...", Color.LightBlue);
+            else
+                Main.NewText($"Extracting {platform} stream URL...", Color.LightBlue);
 
             var cts = new CancellationTokenSource();
             _activeRequests[requestId] = cts;
@@ -388,13 +375,13 @@ public static class VideoUrlHelper
             {
                 try
                 {
-                    string directUrl = await GetDirectUrlFromYouTubeAsync(url, cts.Token);
+                    VideoStreamResult result = await GetDirectUrlAsync(url, cts.Token);
                     _activeRequests.TryRemove(requestId, out _);
-                    Main.QueueMainThreadAction(() => onComplete?.Invoke(directUrl));
+                    Main.QueueMainThreadAction(() => onComplete?.Invoke(result));
                 }
                 catch (OperationCanceledException)
                 {
-                    TerraVision.instance.Logger.Info($"URL request {requestId} was cancelled by user");
+                    TerraVision.instance.Logger.Info($"URL request {requestId} cancelled");
                     _activeRequests.TryRemove(requestId, out _);
                 }
                 catch (Exception ex)
@@ -407,15 +394,15 @@ public static class VideoUrlHelper
         }
         else
         {
-            // Direct URL pass-through (like direct .mp4 links)
-            onComplete?.Invoke(url);
+            // Direct .mp4 / .m3u8 links — wrap in a plain result, no headers needed
+            onComplete?.Invoke(new VideoStreamResult { VideoUrl = url });
         }
     }
 
     /// <summary>
     /// Process a search query asynchronously.
     /// </summary>
-    public static void ProcessSearchAsync(string searchQuery, Action<string> onComplete, Guid requestId, int resultIndex = 0, int maxResults = 10)
+    public static void ProcessSearchAsync(string searchQuery, Action<VideoStreamResult> onComplete, Guid requestId, int resultIndex = 0, int maxResults = 10)
     {
         Main.NewText("Searching YouTube...", Color.LightBlue);
 
@@ -431,29 +418,22 @@ public static class VideoUrlHelper
                 if (videoUrl == null)
                 {
                     if (!cts.Token.IsCancellationRequested)
-                    {
-                        Main.QueueMainThreadAction(() =>
-                        {
-                            Main.NewText("No search results found!", Color.Orange);
-                        });
-                    }
+                        Main.QueueMainThreadAction(() => Main.NewText("No search results found!", Color.Orange));
+
                     _activeRequests.TryRemove(requestId, out _);
                     Main.QueueMainThreadAction(() => onComplete?.Invoke(null));
                     return;
                 }
 
-                Main.QueueMainThreadAction(() =>
-                {
-                    Main.NewText("Found video, extracting stream...", Color.LightGreen);
-                });
+                Main.QueueMainThreadAction(() => Main.NewText("Found video, extracting stream...", Color.LightGreen));
 
-                string directUrl = await GetDirectUrlFromYouTubeAsync(videoUrl, cts.Token);
+                VideoStreamResult result = await GetDirectUrlAsync(videoUrl, cts.Token);
                 _activeRequests.TryRemove(requestId, out _);
-                Main.QueueMainThreadAction(() => onComplete?.Invoke(directUrl));
+                Main.QueueMainThreadAction(() => onComplete?.Invoke(result));
             }
             catch (OperationCanceledException)
             {
-                TerraVision.instance.Logger.Info($"Search request {requestId} was cancelled by user");
+                TerraVision.instance.Logger.Info($"Search request {requestId} cancelled");
                 _activeRequests.TryRemove(requestId, out _);
             }
             catch (Exception ex)
@@ -498,4 +478,26 @@ public class VideoUrlHelperSystem : ModSystem
     {
         VideoUrlHelper.ClearCache();
     }
+}
+
+public class VideoStreamResult
+{
+    /// <summary>Primary video (or combined) stream URL.</summary>
+    public string VideoUrl { get; set; }
+
+    /// <summary>
+    /// Separate audio stream URL, if the site uses DASH (e.g. Bilibili).
+    /// Pass to VLC via :input-slave= option.
+    /// Null if audio is muxed into VideoUrl.
+    /// </summary>
+    public string AudioUrl { get; set; }
+
+    /// <summary>
+    /// HTTP headers required by the CDN (e.g. Referer for Bilibili).
+    /// Pass each one to VLC via :http-header-add= option.
+    /// </summary>
+    public Dictionary<string, string> HttpHeaders { get; set; } = new();
+
+    /// <summary>True if this stream is a live broadcast.</summary>
+    public bool IsLivestream { get; set; }
 }

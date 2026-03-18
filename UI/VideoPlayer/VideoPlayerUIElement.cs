@@ -99,50 +99,8 @@ public class VideoPlayerUIElement : UIElement, IDisposable
 
     protected override void DrawSelf(SpriteBatch spriteBatch)
     {
-        CalculatedStyle dimensions = GetDimensions();
-        Rectangle drawArea = dimensions.ToRectangle();
-
-        // Draw background
-        spriteBatch.Draw(ExampleVideoUISystem.Background.Value, drawArea, _backgroundColor);
-
-        // Draw video if available and playing
-        if (_playerCore.CurrentTexture != null && _playerCore.IsPlaying)
-        {
-            Rectangle videoRect = _playerCore.CalculateRenderRectangle(drawArea);
-            spriteBatch.Draw(_playerCore.CurrentTexture, videoRect, Color.White);
-        }
-
-        // Draw loading spinner
-        if (_playerCore.IsLoading)
-        {
-            Vector2 center = new Vector2(drawArea.Center.X, drawArea.Center.Y);
-            DrawLoadingSpinner(spriteBatch, center, _playerCore.LoadingRotation);
-        }
-    }
-
-    private void DrawLoadingSpinner(SpriteBatch spriteBatch, Vector2 center, float rotation)
-    {
-        for (int i = 0; i < 8; i++)
-        {
-            float angle = rotation + (i * MathHelper.TwoPi / 8f);
-            float alpha = 0.3f + (0.7f * (i / 8f));
-            Vector2 offset = new Vector2(
-                (float)Math.Cos(angle) * 20f,
-                (float)Math.Sin(angle) * 20f
-            );
-
-            Rectangle dotRect = new Rectangle(
-                (int)(center.X + offset.X - 3),
-                (int)(center.Y + offset.Y - 3),
-                6, 6
-            );
-
-            spriteBatch.Draw(
-                ExampleVideoUISystem.Background.Value,
-                dotRect,
-                Color.White * alpha
-            );
-        }
+        Rectangle drawArea = GetDimensions().ToRectangle();
+        _playerCore.Draw(spriteBatch, drawArea, ExampleVideoUISystem.Background.Value, _backgroundColor);
     }
 
     #endregion
@@ -168,7 +126,7 @@ public class VideoPlayerUIElement : UIElement, IDisposable
                 _playerCore.PlaybackStopped -= OnPlaybackStopped;
                 _playerCore.PlaybackError -= OnPlaybackError;
 
-                _playerCore.Dispose();
+                _playerCore?.Dispose();
                 _playerCore = null;
             }
         }

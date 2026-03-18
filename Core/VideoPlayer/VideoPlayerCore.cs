@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
 using Terraria.ModLoader;
+using TerraVision.Core.VideoPlayer.Danmaku;
 
 namespace TerraVision.Core.VideoPlayer;
 
@@ -17,7 +18,7 @@ namespace TerraVision.Core.VideoPlayer;
 /// Core video player logic
 /// Handles LibVLC media playback, frame capture, and texture management.
 /// </summary>
-public class VideoPlayerCore : IDisposable
+public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDisposable
 {
     // Video playback components
     private MediaPlayer _mediaPlayer;
@@ -29,8 +30,8 @@ public class VideoPlayerCore : IDisposable
     private readonly TexturePool _texturePool = new();
 
     // Video dimensions
-    private readonly int _videoWidth;
-    private readonly int _videoHeight;
+    private readonly int _videoWidth = videoWidth;
+    private readonly int _videoHeight = videoHeight;
 
     // Playback state
     private bool _isInitialized;
@@ -42,7 +43,7 @@ public class VideoPlayerCore : IDisposable
     private bool _isPreparing;
 
     // Video queue for playlists
-    private Queue<string> _videoQueue = new Queue<string>();
+    private Queue<string> _videoQueue = [];
     private bool _autoAdvanceQueue = false;
     private string _currentlyPlayingUrl = null;
 
@@ -61,7 +62,15 @@ public class VideoPlayerCore : IDisposable
     private bool _textureNeedsUpdate;
 
     // Thread safety
-    private readonly object _stateLock = new object();
+    private readonly object _stateLock = new();
+
+    // Danmaku
+    private readonly DanmakuRenderer _danmakuRenderer = new();
+    private List<DanmakuComment> _danmakuComments = null;
+    private int _danmakuCursor = 0; // index into sorted comment list
+    private string _danmakuSourceUrl = null; // URL we fetched comments for
+    private bool _danmakuFetchInProgress = false;
+    private Vector2 _lastDrawSize = new Vector2(1280, 720);
 
     #region Events
 
@@ -95,15 +104,8 @@ public class VideoPlayerCore : IDisposable
     public Guid SessionId => _sessionId;
 
     #endregion
-
+    
     #region Initialization
-
-    public VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720)
-    {
-        _videoWidth = videoWidth;
-        _videoHeight = videoHeight;
-    }
-
     private async Task EnsureInitializedAsync()
     {
         if (_isInitialized || TerraVision.instance == null || TerraVision.LibVLCInstance == null)
@@ -328,11 +330,10 @@ public class VideoPlayerCore : IDisposable
         var sessionId = _sessionId;
 
         TerraVision.instance.Logger.Info($"PlayVideoUrlInternal called for session {_sessionId}, request {requestId}");
-
         _isPreparing = true;
         SetLoadingState(true);
 
-        VideoUrlHelper.ProcessUrlAsync(url, (processedUrl) =>
+        VideoUrlHelper.ProcessUrlAsync(url, (streamResult) =>
         {
             try
             {
@@ -340,18 +341,17 @@ public class VideoPlayerCore : IDisposable
                 {
                     try
                     {
-                        TerraVision.instance.Logger.Info($"Processed url found: {processedUrl}");
-
+                        TerraVision.instance.Logger.Info($"Processed url found: {streamResult?.VideoUrl}");
                         SetLoadingState(false);
 
                         if (_sessionId != sessionId || _currentRequestId != requestId || _isDisposed)
                         {
                             _isPreparing = false;
-                            TerraVision.instance.Logger.Warn($"Invalid Session ID!");
+                            TerraVision.instance.Logger.Warn("Invalid Session ID!");
                             return;
                         }
 
-                        if (processedUrl == null)
+                        if (streamResult == null)
                         {
                             TerraVision.instance.Logger.Error("Failed to extract video URL");
                             _isPreparing = false;
@@ -359,9 +359,15 @@ public class VideoPlayerCore : IDisposable
                             return;
                         }
 
-                        _currentMedia = new Media(TerraVision.LibVLCInstance, processedUrl, FromType.FromLocation);
+                        _currentMedia = BuildMedia(streamResult);
                         _currentVideoPath = url;
                         _mediaPlayer.Play(_currentMedia);
+
+                        // Kick off danmaku fetch for Bilibili videos
+                        if (url.Contains("bilibili.com"))
+                            FetchDanmakuAsync(url);
+                        else
+                            ClearDanmaku();
                     }
                     catch (Exception ex)
                     {
@@ -411,7 +417,7 @@ public class VideoPlayerCore : IDisposable
         _isPreparing = true;
         SetLoadingState(true);
 
-        VideoUrlHelper.ProcessSearchAsync(query, (processedUrl) =>
+        VideoUrlHelper.ProcessSearchAsync(query, (streamResult) =>
         {
             try
             {
@@ -420,21 +426,21 @@ public class VideoPlayerCore : IDisposable
                     try
                     {
                         SetLoadingState(false);
+
                         if (_sessionId != sessionId || _currentRequestId != requestId || _isDisposed)
                         {
                             _isPreparing = false;
                             return;
                         }
 
-                        if (processedUrl == null)
+                        if (streamResult == null)
                         {
                             _isPreparing = false;
                             PlayNextInQueue();
                             return;
                         }
 
-                        _currentMedia = new Media(TerraVision.LibVLCInstance, processedUrl, FromType.FromLocation);
-                        
+                        _currentMedia = BuildMedia(streamResult);
                         _currentVideoPath = query;
                         _mediaPlayer.Play(_currentMedia);
                     }
@@ -451,6 +457,66 @@ public class VideoPlayerCore : IDisposable
                 TerraVision.instance.Logger.Error($"Error in PlayYouTubeSearchInternal callback: {ex.Message}");
             }
         }, requestId, resultIndex, maxResults);
+    }
+
+    private static Media BuildMedia(VideoStreamResult streamResult)
+    {
+        // Local file path (e.g. downloaded Bilibili temp file) — no headers needed
+        if (Path.IsPathRooted(streamResult.VideoUrl) && File.Exists(streamResult.VideoUrl))
+        {
+            TerraVision.instance.Logger.Debug($"Playing from local file: {streamResult.VideoUrl}");
+            return new Media(TerraVision.LibVLCInstance, streamResult.VideoUrl, FromType.FromPath);
+        }
+
+        // Remote URL
+        var media = new Media(TerraVision.LibVLCInstance, streamResult.VideoUrl, FromType.FromLocation);
+
+        if (streamResult.HttpHeaders.TryGetValue("Referer", out string referer))
+            media.AddOption($":http-referrer={referer}");
+
+        if (!string.IsNullOrWhiteSpace(streamResult.AudioUrl))
+            media.AddOption($":input-slave={streamResult.AudioUrl}");
+
+        return media;
+    }
+
+    private void FetchDanmakuAsync(string url)
+    {
+        if (_danmakuFetchInProgress || _danmakuSourceUrl == url)
+            return;
+
+        _danmakuFetchInProgress = true;
+        _danmakuSourceUrl = url;
+        ClearDanmaku();
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                var comments = await DanmakuFetcher.FetchAsync(url);
+                // Marshal back — comment list is read-only after this point so no lock needed
+                Main.QueueMainThreadAction(() =>
+                {
+                    _danmakuComments = comments;
+                    _danmakuCursor = 0;
+                    _danmakuFetchInProgress = false;
+                    TerraVision.instance.Logger.Info(
+                        $"Danmaku ready: {comments.Count} comments loaded");
+                });
+            }
+            catch (Exception ex)
+            {
+                TerraVision.instance.Logger.Error($"Danmaku fetch error: {ex.Message}");
+                _danmakuFetchInProgress = false;
+            }
+        });
+    }
+
+    private void ClearDanmaku()
+    {
+        _danmakuComments = null;
+        _danmakuCursor = 0;
+        _danmakuRenderer.Clear();
     }
 
     /// <summary>
@@ -751,6 +817,8 @@ public class VideoPlayerCore : IDisposable
     public long GetDuration() => _mediaPlayer?.Length ?? 0;
     public int GetVolume() => _mediaPlayer?.Volume ?? 0;
 
+    public float GetTimeSeconds() => GetPosition() * GetDuration() / 1000f;
+
     #endregion
 
     #region Settings
@@ -805,6 +873,8 @@ public class VideoPlayerCore : IDisposable
         _isPaused = false;
         _isPreparing = false;
         PlaybackStopped?.Invoke(this, EventArgs.Empty);
+
+        ClearDanmaku();
     }
 
     private void OnEndReached(object sender, EventArgs e)
@@ -833,6 +903,8 @@ public class VideoPlayerCore : IDisposable
             _autoAdvanceQueue = false;
             PlaybackEnded?.Invoke(this, EventArgs.Empty);
         }
+
+        ClearDanmaku();
     }
 
     private void OnError(object sender, EventArgs e)
@@ -840,6 +912,8 @@ public class VideoPlayerCore : IDisposable
         _isPlaying = false;
         _isPreparing = false;
         PlaybackError?.Invoke(this, EventArgs.Empty);
+
+        ClearDanmaku();
     }
 
     private void SetLoadingState(bool loading)
@@ -892,6 +966,8 @@ public class VideoPlayerCore : IDisposable
                 _textureNeedsUpdate = false;
             }
         }
+
+        UpdateDanmaku(gameTime);
     }
 
     private void UpdateTexture(byte[] rgbaData, int stride)
@@ -912,6 +988,117 @@ public class VideoPlayerCore : IDisposable
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"Texture update failed: {ex}");
+        }
+    }
+
+    private void UpdateDanmaku(GameTime gameTime)
+    {
+        if (_danmakuComments == null || _danmakuComments.Count == 0)
+            return;
+
+        if (!_isPlaying)
+            return;
+
+        _danmakuRenderer.Update(_isPaused ? 0f : (float)gameTime.ElapsedGameTime.TotalSeconds, _lastDrawSize);
+
+        float currentTime = GetTimeSeconds();
+
+        // Reset cursor on seek backwards
+        if (_danmakuCursor > 0 && _danmakuComments[_danmakuCursor - 1].Time > currentTime)
+        {
+            _danmakuCursor = 0;
+            _danmakuRenderer.Clear();
+        }
+
+        // Activate comments whose time has arrived
+        while (!_isPaused && _danmakuCursor < _danmakuComments.Count && _danmakuComments[_danmakuCursor].Time <= currentTime)
+        {
+            _danmakuRenderer.Activate(_danmakuComments[_danmakuCursor], _lastDrawSize);
+            _danmakuCursor++;
+        }
+    }
+
+    #endregion
+
+    #region Rendering
+
+    /// <summary>
+    /// Draw overload for UI elements — takes a Rectangle.
+    /// </summary>
+    public void Draw(SpriteBatch spriteBatch, Rectangle targetRect, Texture2D pixel, Color backgroundColor = default)
+    {
+        if (backgroundColor != default)
+            spriteBatch.Draw(pixel, targetRect, backgroundColor);
+
+        DrawCore(spriteBatch, pixel, targetRect.Location.ToVector2(), new Vector2(targetRect.Width, targetRect.Height));
+    }
+
+    /// <summary>
+    /// Draw overload for world-space tile entities — takes Vector2 position and size.
+    /// </summary>
+    public void Draw(SpriteBatch spriteBatch, Vector2 position, Vector2 size, Texture2D pixel)
+    {
+        DrawCore(spriteBatch, pixel, position, size);
+    }
+
+    private void DrawCore(SpriteBatch spriteBatch, Texture2D pixel, Vector2 position, Vector2 size)
+    {
+        _lastDrawSize = size; // capture for UpdateDanmaku
+
+        Rectangle targetRect = new((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
+        Rectangle videoRect = CalculateRenderRectangle(targetRect);
+
+        if (_videoTexture != null && (_isPlaying || _isPaused))
+        {
+            try
+            {
+                // Maintain aspect ratio within the target area               
+                spriteBatch.Draw(_videoTexture, videoRect, Color.White);
+            }
+            catch (Exception ex)
+            {
+                TerraVision.instance.Logger.Error($"Error drawing video texture: {ex.Message}");
+            }
+        }
+
+        if (_isLoading || _isPreparing)
+        {
+            Vector2 center = position + size / 2f;
+            // Scale spinner radius and dot size proportionally to the draw area
+            float spinnerRadius = Math.Min(size.X, size.Y) * 0.07f;
+            float dotSize = Math.Max(2f, spinnerRadius * 0.35f);
+            DrawLoadingSpinner(spriteBatch, pixel, center, spinnerRadius, dotSize);
+        }
+
+        _danmakuRenderer.Draw(spriteBatch, videoRect.TopLeft(), videoRect.Size());
+    }
+
+    private void DrawLoadingSpinner(SpriteBatch spriteBatch, Texture2D pixel, Vector2 center, float radius, float dotSize)
+    {
+        try
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                float angle = _loadingRotation + (i * MathHelper.TwoPi / 8f);
+                float alpha = 0.3f + (0.7f * (i / 8f));
+                Vector2 offset = new(
+                    (float)Math.Cos(angle) * radius,
+                    (float)Math.Sin(angle) * radius
+                );
+
+                int d = (int)dotSize;
+                Rectangle dotRect = new Rectangle(
+                    (int)(center.X + offset.X - d / 2),
+                    (int)(center.Y + offset.Y - d / 2),
+                    d, d
+                );
+
+                spriteBatch.Draw(pixel, dotRect, Color.White * alpha);
+            }
+        }
+        catch (Exception ex)
+        {
+            TerraVision.instance.Logger.Error($"Error drawing loading spinner: {ex.Message}");
         }
     }
 
@@ -974,7 +1161,7 @@ public class VideoPlayerCore : IDisposable
         _mediaPlayer?.Dispose();
         _mediaPlayer = null;
 
-        TerraVision.instance.Logger.Info($"Disposing VideoPlayerCore (session {_sessionId})");
+        ModContent.GetInstance<TerraVision>().Logger.Info($"Disposing VideoPlayerCore (session {_sessionId})");
 
         if (disposing)
         {

@@ -386,7 +386,7 @@ public class ExampleVideoPlayerUI : UIState
         if (_videoPlayer != null && !_videoPlayer._isDisposed)
         {
             _videoPlayer.Stop();
-            _videoPlayer.Dispose();
+            _videoPlayer?.Dispose();
             TerraVision.instance.Logger.Info("Player disposed in OnClose");
         }
 

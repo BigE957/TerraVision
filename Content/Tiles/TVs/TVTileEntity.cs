@@ -195,29 +195,7 @@ public class TVTileEntity : ModTileEntity
         var player = GetVideoPlayer();
         if (player == null) return;
 
-        if (player.IsLoading)
-        {
-            Vector2 center = position + size / 2f;
-            DrawLoadingSpinner(spriteBatch, center, player.LoadingRotation);
-            return;
-        }
-
-        if (player.IsPlaying && player.CurrentTexture != null)
-        {
-            try
-            {
-                Vector2 scale = new Vector2(
-                    size.X / player.CurrentTexture.Width,
-                    size.Y / player.CurrentTexture.Height
-                );
-                spriteBatch.Draw(player.CurrentTexture, position, null,
-                    Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-            }
-            catch (Exception ex)
-            {
-                TerraVision.instance.Logger.Error($"Error drawing video texture: {ex.Message}");
-            }
-        }
+        player.Draw(spriteBatch, position, size, ExampleVideoUISystem.Background.Value);
     }
 
     private static Asset<Texture2D> _staticTexture;
@@ -248,34 +226,6 @@ public class TVTileEntity : ModTileEntity
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"Error drawing static: {ex.Message}");
-        }
-    }
-
-    private static void DrawLoadingSpinner(SpriteBatch spriteBatch, Vector2 center, float rotation)
-    {
-        try
-        {
-            Texture2D pixel = ExampleVideoUISystem.Background.Value;
-
-            for (int i = 0; i < 8; i++)
-            {
-                float angle = rotation + (i * MathHelper.TwoPi / 8f);
-                float alpha = 0.3f + (0.7f * (i / 8f));
-                Vector2 offset = new Vector2(
-                    (float)Math.Cos(angle) * 10f,
-                    (float)Math.Sin(angle) * 10f
-                );
-
-                Rectangle dotRect = new Rectangle(
-                    (int)(center.X + offset.X - 2), (int)(center.Y + offset.Y - 2), 4, 4
-                );
-
-                spriteBatch.Draw(pixel, dotRect, Color.White * alpha);
-            }
-        }
-        catch (Exception ex)
-        {
-            TerraVision.instance.Logger.Error($"Error drawing loading spinner: {ex.Message}");
         }
     }
 

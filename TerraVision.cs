@@ -50,26 +50,32 @@ public class TerraVision : Mod
 
         string vlcPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                                       "My Games", "Terraria", "tModLoader", "VideoPlayerLibs");
-
         try
         {
             LibVLCSharp.Shared.Core.Initialize(vlcPath);
             _coreInitialized = true;
 
-            string[] args = new string[]
-            {
-                    "--no-quiet", // Keep LibVLC logs for now, helpful for debugging
-                    "--network-caching=1000",
-                    "--file-caching=1000",
-                    "--avcodec-fast",
-                    "--aout=directsound,waveout,mmdevice",
-            };
+            string[] args =
+            [
+                "--no-quiet",
+                "--network-caching=1000",
+                "--file-caching=1000",
+                "--avcodec-fast",
+                "--aout=directsound,waveout,mmdevice",
+            ];
 
             LibVLCInstance = new LibVLC(args);
 
+            // Correct way to get VLC logs — event subscription, not constructor args
+            LibVLCInstance.Log += (sender, e) =>
+            {
+                // Only capture warnings and errors to avoid spam
+                if (e.Level >= LogLevel.Warning)
+                    instance.Logger.Debug($"[VLC/{e.Level}] ({e.Module}) {e.Message}");
+            };
+
             instance.Logger.Info("LibVLC initialized successfully!");
             instance.Logger.Info($"LibVLC version: {LibVLCInstance.Version}");
-
             LogAudioCapabilities();
         }
         catch (Exception ex)
