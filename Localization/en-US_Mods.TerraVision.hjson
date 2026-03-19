@@ -2,6 +2,7 @@ Tiles: {
 	BoxTVTile.MapEntry: Box T V Tile
 	CassettePlayer.MapEntry: Cassette Player
 	FlatscreenTVTile.MapEntry: Flatscreen T V Tile
+	StreamingPlayer.MapEntry: Streaming Player
 }
 
 Items: {
@@ -16,22 +17,22 @@ Items: {
 	}
 
 	BoxTVItem: {
-		DisplayName: Box T V Item
+		DisplayName: Box TV
 		Tooltip: ""
 	}
 
 	CassettePlayerItem: {
-		DisplayName: Cassette Player Item
+		DisplayName: Cassette Player
 		Tooltip: ""
 	}
 
 	FlatscreenTVItem: {
-		DisplayName: Flatscreen T V Item
+		DisplayName: Flatscreen TV
 		Tooltip: ""
 	}
 
 	VideoPlayerOpenerItem: {
-		DisplayName: Video Player Opener Item
+		DisplayName: Video Player Opener
 		Tooltip: ""
 	}
 
@@ -43,6 +44,100 @@ Items: {
 
 		HubrisCassette: {
 			DisplayName: Hubris Cassette
+			Tooltip: ""
+		}
+	}
+
+	StreamingPlayerItem: {
+		DisplayName: Streaming Player
+		Tooltip: ""
+	}
+}
+
+Configs: {
+	TerraVisionConfig: {
+		DisplayName: TerraVision Settings
+		Headers.Captions: Captions
+
+		BrowserForCookies: {
+			Label: Browser for Cookies
+			Tooltip:
+				'''
+				Which browser yt-dlp should read login cookies from when fetching captions.
+				Required for platforms that need a login to access subtitles (e.g. Bilibili).
+				Select the browser you use to log into video sites.
+
+				'Auto' tries Chrome, Firefox, then Edge in sequence.
+				'Opera GX' is listed separately from Opera — pick the right one for your install.
+				'None' disables cookie-based auth entirely (Bilibili captions will be unavailable).
+
+				Note: Chromium-based browsers (Chrome, Edge, Opera, Brave) may fail to share
+				cookies while the browser is open due to database locking. Firefox does not
+				have this limitation and is the most reliable choice if captions are important.
+				'''
+		}
+
+		CookiesFilePath: {
+			Label: Cookies File Path (Advanced)
+			Tooltip:
+				'''
+				Optional: path to a Netscape-format cookies.txt file exported from your browser.
+				If set, this takes priority over the 'Browser for Cookies' setting above.
+				Leave blank to use the browser setting instead.
+
+				Example: C:\Users\you\Desktop\cookies.txt
+
+				You can export a cookies.txt from Chrome or Firefox using the
+				'Get cookies.txt LOCALLY' browser extension.
+				'''
+		}
+	}
+
+	BrowserCookieSource: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Auto
+			Tooltip: ""
+		}
+
+		Chrome: {
+			Label: Chrome
+			Tooltip: ""
+		}
+
+		Firefox: {
+			Label: Firefox
+			Tooltip: ""
+		}
+
+		Edge: {
+			Label: Edge
+			Tooltip: ""
+		}
+
+		Brave: {
+			Label: Brave
+			Tooltip: ""
+		}
+
+		Opera: {
+			Label: Opera
+			Tooltip: ""
+		}
+
+		Vivaldi: {
+			Label: Vivaldi
+			Tooltip: ""
+		}
+
+		None: {
+			Label: None
+			Tooltip: ""
+		}
+
+		OperaGX: {
+			Label: Opera GX
 			Tooltip: ""
 		}
 	}

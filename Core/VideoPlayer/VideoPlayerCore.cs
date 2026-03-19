@@ -342,8 +342,13 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         _isPreparing = true;
         SetLoadingState(true);
 
-        // Fetch captions for YouTube videos
-        if (VideoUrlHelper.IsYouTubeUrl(url))
+        // Fetch captions for all supported platforms.
+        // YouTube: word-level VTT (progressive reveal)
+        // Bilibili: SRT via browser cookies (block reveal) — requires login, see mod settings
+        // Vimeo: plain VTT (block reveal)
+        // Other URLs: generic yt-dlp attempt, low hit rate but handled gracefully
+        bool isLocalFile = IsFilePath(url);
+        if (!isLocalFile)
             FetchCaptionsAsync(url);
         else
             _captions = null;
@@ -523,7 +528,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         {
             try
             {
-                var entries = await CaptionFetcher.FetchYouTubeAsync(url, ytdlpPath, cts.Token);
+                var entries = await CaptionFetcher.FetchAsync(url, ytdlpPath, cts.Token);
                 if (cts.IsCancellationRequested) return;
                 Main.QueueMainThreadAction(() =>
                 {
