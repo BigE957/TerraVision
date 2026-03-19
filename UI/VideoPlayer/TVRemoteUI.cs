@@ -34,8 +34,10 @@ public class TVRemoteUI : UIState
         Append(_mainPanel);
 
         // Title
-        UIText title = new UIText("TV Remote", 1.2f);
-        title.HAlign = 0.5f;
+        UIText title = new UIText("TV Remote", 1.2f)
+        {
+            HAlign = 0.5f
+        };
         title.Top.Set(10f, 0f);
         _mainPanel.Append(title);
 

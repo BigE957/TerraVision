@@ -123,8 +123,10 @@ public class ExampleVideoPlayerUI : UIState
         float videoWidth = _currentWidth - 100;
         float videoHeight = _currentHeight - 240;
 
-        _videoPlayer = new VideoPlayerUIElement((int)videoWidth, (int)videoHeight, 1280, 720);
-        _videoPlayer.HAlign = 0.5f;
+        _videoPlayer = new VideoPlayerUIElement((int)videoWidth, (int)videoHeight, 1280, 720)
+        {
+            HAlign = 0.5f
+        };
         _videoPlayer.Top.Set(80, 0f);
         _mainPanel.Append(_videoPlayer);
     }
