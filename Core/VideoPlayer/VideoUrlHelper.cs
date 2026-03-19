@@ -17,19 +17,17 @@ public static class VideoUrlHelper
     private static readonly ConcurrentDictionary<string, (VideoStreamResult Result, DateTime Timestamp, bool IsLivestream)> _urlCache = new();
     private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeRequests = new();
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan LivestreamCacheDuration = TimeSpan.FromMinutes(2); // Livestream URLs expire quickly
+    private static readonly TimeSpan LivestreamCacheDuration = TimeSpan.FromMinutes(2);
     private static readonly SemaphoreSlim _requestLock = new(1, 1);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan SemaphoreTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(5);
 
-    // Hybrid extractor (yt-dlp + YoutubeExplode)
     private static HybridVideoExtractor _extractor;
     private static bool _isInitialized = false;
 
     /// <summary>
-    /// Initialize the video extractor system.
-    /// Call this during mod load.
+    /// Initialize the video extractor system. Call this during mod load.
     /// </summary>
     public static async Task InitializeAsync()
     {
@@ -54,34 +52,17 @@ public static class VideoUrlHelper
         _isInitialized = success;
     }
 
-    /// <summary>
-    /// Check if the extractor is ready.
-    /// </summary>
     public static bool IsReady => _isInitialized && _extractor != null && _extractor.IsAvailable;
-
-    /// <summary>
-    /// Check if livestreams are supported.
-    /// </summary>
     public static bool SupportsLivestreams => IsReady && _extractor.SupportsLivestreams;
 
-    /// <summary>
-    /// Check if a URL is a YouTube playlist link.
-    /// </summary>
     public static bool IsYouTubePlaylist(string url)
     {
         return (url.Contains("youtube.com") || url.Contains("youtu.be")) &&
                (url.Contains("list=") || url.Contains("/playlist?"));
     }
 
-    /// <summary>
-    /// Check if a URL is a YouTube link.
-    /// </summary>
     public static bool IsYouTubeUrl(string url) => url.Contains("youtube.com") || url.Contains("youtu.be");
 
-    /// <summary>
-    /// Check if a URL is from a supported video platform.
-    /// This includes YouTube, Twitch, Vimeo, and many others supported by yt-dlp.
-    /// </summary>
     public static bool IsSupportedVideoUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -89,12 +70,9 @@ public static class VideoUrlHelper
 
         string[] supportedDomains = new[]
         {
-            // Most reliable
             "youtube.com", "youtu.be",
             "twitch.tv",
             "vimeo.com",
-
-            // Sometimes work (depends on video)
             "twitter.com", "x.com",
             "tiktok.com",
             "reddit.com",
@@ -105,9 +83,6 @@ public static class VideoUrlHelper
         return supportedDomains.Any(domain => lowerUrl.Contains(domain));
     }
 
-    /// <summary>
-    /// Extract playlist ID from a YouTube URL.
-    /// </summary>
     public static string ExtractPlaylistId(string url)
     {
         try
@@ -118,11 +93,9 @@ public static class VideoUrlHelper
 
             string afterList = url.Substring(listIndex + 5);
             int ampersandIndex = afterList.IndexOf('&');
-            string playlistId = ampersandIndex != -1
+            return ampersandIndex != -1
                 ? afterList.Substring(0, ampersandIndex)
                 : afterList;
-
-            return playlistId;
         }
         catch (Exception ex)
         {
@@ -131,47 +104,76 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Clear the URL cache.
-    /// </summary>
     public static void ClearCache()
     {
         _urlCache.Clear();
         TerraVision.instance.Logger.Info("Video URL cache cleared");
     }
 
-    /// <summary>
-    /// Clean up expired cache entries.
-    /// </summary>
     public static void CleanupCache()
     {
-        // Fix 17: use UtcNow consistently to avoid DST-related comparison bugs.
-        var now = DateTime.UtcNow;
         var keysToRemove = new List<string>();
 
         foreach (var kvp in _urlCache)
         {
-            var cacheDuration = kvp.Value.IsLivestream ? LivestreamCacheDuration : CacheDuration;
-            if (now - kvp.Value.Timestamp >= cacheDuration)
-            {
+            bool expired = kvp.Value.IsLivestream
+                ? DateTime.UtcNow - kvp.Value.Timestamp >= LivestreamCacheDuration
+                : !IsCachedResultStillValid(kvp.Value.Result, kvp.Value.Timestamp);
+
+            if (expired)
                 keysToRemove.Add(kvp.Key);
-            }
         }
 
         foreach (var key in keysToRemove)
-        {
             _urlCache.TryRemove(key, out _);
-        }
 
         if (keysToRemove.Count > 0)
-        {
             TerraVision.instance.Logger.Info($"Cleaned up {keysToRemove.Count} expired cache entries");
-        }
     }
 
     /// <summary>
-    /// Get direct stream URL from a URL.
+    /// Returns true if a cached stream result is still safe to use.
+    /// For URLs containing a Bilibili-style &amp;deadline= parameter, the deadline
+    /// is parsed and used directly — this prevents serving a URL whose CDN auth
+    /// has expired even if our own cache duration hasn't elapsed yet.
+    /// Falls back to CacheDuration for all other URLs.
     /// </summary>
+    private static bool IsCachedResultStillValid(VideoStreamResult result, DateTime cachedAt)
+    {
+        if (result?.VideoUrl != null)
+        {
+            long deadline = ExtractDeadlineFromUrl(result.VideoUrl);
+            if (deadline > 0)
+            {
+                // Give a 60-second buffer before the CDN deadline to avoid serving
+                // a URL that expires mid-playback
+                var expiry = DateTimeOffset.FromUnixTimeSeconds(deadline - 60).UtcDateTime;
+                return DateTime.UtcNow < expiry;
+            }
+        }
+
+        return DateTime.UtcNow - cachedAt < CacheDuration;
+    }
+
+    /// <summary>
+    /// Extracts the &amp;deadline=UNIX_TIMESTAMP parameter from a URL, or returns 0.
+    /// </summary>
+    private static long ExtractDeadlineFromUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return 0;
+
+        int idx = url.IndexOf("deadline=", StringComparison.Ordinal);
+        if (idx < 0)
+            return 0;
+
+        idx += "deadline=".Length;
+        int end = url.IndexOf('&', idx);
+        string value = end < 0 ? url[idx..] : url[idx..end];
+
+        return long.TryParse(value, out long ts) ? ts : 0;
+    }
+
     public static async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
@@ -180,7 +182,7 @@ public static class VideoUrlHelper
             return null;
         }
 
-        // Fix 17: UtcNow for all timestamp comparisons.
+        // FIX #17: use UtcNow for cache timestamp comparisons
         if (_urlCache.TryGetValue(url, out var cached))
         {
             if (cached.IsLivestream)
@@ -188,7 +190,7 @@ public static class VideoUrlHelper
                 _urlCache.TryRemove(url, out _);
                 TerraVision.instance.Logger.Debug("Livestream in cache - fetching fresh URL");
             }
-            else if (DateTime.UtcNow - cached.Timestamp < CacheDuration)
+            else if (IsCachedResultStillValid(cached.Result, cached.Timestamp))
             {
                 TerraVision.instance.Logger.Debug("Using cached URL for regular video");
                 return cached.Result;
@@ -210,15 +212,15 @@ public static class VideoUrlHelper
                 return null;
             }
 
-            // Fix 7: double-check the cache after acquiring the lock. If two requests
-            // for the same URL arrived simultaneously, the first one will have populated
-            // the cache by the time the second one gets here, avoiding a redundant fetch.
-            if (_urlCache.TryGetValue(url, out var cachedAfterLock) &&
-                !cachedAfterLock.IsLivestream &&
-                DateTime.UtcNow - cachedAfterLock.Timestamp < CacheDuration)
+            // FIX #7: double-check cache after acquiring the lock — a concurrent request
+            // for the same URL may have populated it while we were waiting.
+            if (_urlCache.TryGetValue(url, out var cachedAfterLock))
             {
-                TerraVision.instance.Logger.Debug("Using cached URL (populated while waiting for lock)");
-                return cachedAfterLock.Result;
+                if (!cachedAfterLock.IsLivestream && IsCachedResultStillValid(cachedAfterLock.Result, cachedAfterLock.Timestamp))
+                {
+                    TerraVision.instance.Logger.Debug("Using cached URL (populated while waiting for lock)");
+                    return cachedAfterLock.Result;
+                }
             }
 
             bool isDownload = url.Contains("bilibili.com");
@@ -226,18 +228,17 @@ public static class VideoUrlHelper
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linkedCts.CancelAfter(isDownload ? DownloadTimeout : RequestTimeout);
 
-            // Fix 5: removed the separate IsLivestreamAsync call that used to fire here.
-            // That was a full yt-dlp subprocess invocation just to check liveness, followed
-            // immediately by a second invocation inside GetDirectUrlAsync — paying the
-            // startup cost twice for every regular video. HybridVideoExtractor now sets
-            // streamResult.IsLivestream itself when it routes through the yt-dlp live path,
-            // so we can read it off the result instead.
+            // FIX #5: removed the separate IsLivestreamAsync call that was here.
+            // HybridVideoExtractor now sets result.IsLivestream = true internally when it
+            // detects and routes a livestream, so we get that information for free from
+            // the single GetDirectUrlAsync call below — no redundant yt-dlp metadata fetch.
             VideoStreamResult streamResult = await _extractor.GetDirectUrlAsync(url, linkedCts.Token);
 
             if (streamResult != null)
             {
                 if (!streamResult.IsLivestream)
                 {
+                    // FIX #17: store UtcNow so comparisons are timezone-safe
                     _urlCache[url] = (streamResult, DateTime.UtcNow, false);
                     TerraVision.instance.Logger.Debug("Cached URL for regular video");
                 }
@@ -270,9 +271,6 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Search YouTube and return video URL.
-    /// </summary>
     public static async Task<string> SearchYouTubeAsync(string searchQuery, int resultIndex = 0, int maxResults = 10, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
@@ -303,9 +301,6 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Get all video URLs from a YouTube playlist.
-    /// </summary>
     public static async Task<List<string>> GetPlaylistVideosAsync(string playlistId, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
@@ -336,9 +331,6 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Check if a URL is a livestream.
-    /// </summary>
     public static async Task<bool> IsLivestreamAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
@@ -354,10 +346,6 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Process a URL asynchronously.
-    /// Supports YouTube, Twitch, Vimeo, and many other platforms via yt-dlp.
-    /// </summary>
     public static void ProcessUrlAsync(string url, Action<VideoStreamResult> onComplete, Guid requestId)
     {
         if (IsSupportedVideoUrl(url))
@@ -407,9 +395,6 @@ public static class VideoUrlHelper
         }
     }
 
-    /// <summary>
-    /// Process a search query asynchronously.
-    /// </summary>
     public static void ProcessSearchAsync(string searchQuery, Action<VideoStreamResult> onComplete, Guid requestId, int resultIndex = 0, int maxResults = 10)
     {
         Main.NewText("Searching YouTube...", Color.LightBlue);
@@ -453,9 +438,6 @@ public static class VideoUrlHelper
         }, cts.Token);
     }
 
-    /// <summary>
-    /// Cancel a pending request by its ID.
-    /// </summary>
     public static void CancelRequest(Guid requestId)
     {
         if (_activeRequests.TryRemove(requestId, out var cts))
@@ -506,6 +488,10 @@ public class VideoStreamResult
     /// </summary>
     public Dictionary<string, string> HttpHeaders { get; set; } = new();
 
-    /// <summary>True if this stream is a live broadcast.</summary>
+    /// <summary>
+    /// True if this stream is a live broadcast.
+    /// Set by HybridVideoExtractor when it detects and routes a livestream,
+    /// so callers can make caching decisions without a separate metadata fetch.
+    /// </summary>
     public bool IsLivestream { get; set; }
 }

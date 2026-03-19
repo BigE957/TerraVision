@@ -98,9 +98,11 @@ public class YtDlExtractor : IVideoUrlExtractor
             }
 
             // Initialize YoutubeDL instance
-            _ytdl = new();
-            _ytdl.YoutubeDLPath = _ytdlpPath;
-            _ytdl.OutputFolder = Path.GetTempPath();
+            _ytdl = new()
+            {
+                YoutubeDLPath = _ytdlpPath,
+                OutputFolder = Path.GetTempPath()
+            };
 
             TerraVision.instance.Logger.Info($"yt-dlp initialized successfully");
 

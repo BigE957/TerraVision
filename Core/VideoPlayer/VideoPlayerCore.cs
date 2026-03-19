@@ -66,6 +66,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     // Thread safety
     private readonly object _stateLock = new();
 
+    // CDN failover — backup URLs tried in order when primary stream errors mid-play
+    private List<string> _backupUrls = [];
+    private int _backupUrlIndex = 0;
+    private VideoStreamResult _currentStreamResult = null;
+
     // Danmaku
     private readonly DanmakuRenderer _danmakuRenderer = new();
     private List<DanmakuComment> _danmakuComments = null;
@@ -342,11 +347,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         _isPreparing = true;
         SetLoadingState(true);
 
-        // Fetch captions for all supported platforms.
-        // YouTube: word-level VTT (progressive reveal)
-        // Bilibili: SRT via browser cookies (block reveal) — requires login, see mod settings
-        // Vimeo: plain VTT (block reveal)
-        // Other URLs: generic yt-dlp attempt, low hit rate but handled gracefully
+        // Fetch captions for all supported platforms — YouTube, Bilibili, Vimeo, and generic.
+        // Local file paths are excluded since there's nothing to fetch for those.
         bool isLocalFile = IsFilePath(url);
         if (!isLocalFile)
             FetchCaptionsAsync(url);
@@ -385,6 +387,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                             return;
                         }
 
+                        _currentStreamResult = streamResult;
+                        _backupUrls = streamResult.HttpHeaders.TryGetValue("X-Backup-Urls", out string rawBU)
+                            ? [.. rawBU.Split('|', StringSplitOptions.RemoveEmptyEntries)]
+                            : [];
+                        _backupUrlIndex = 0;
                         _currentMedia = BuildMedia(streamResult);
                         _currentVideoPath = url;
                         _mediaPlayer.Play(_currentMedia);
@@ -460,6 +467,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                             return;
                         }
 
+                        _currentStreamResult = streamResult;
+                        _backupUrls = streamResult.HttpHeaders.TryGetValue("X-Backup-Urls", out string rawBU2)
+                            ? [.. rawBU2.Split('|', StringSplitOptions.RemoveEmptyEntries)]
+                            : [];
+                        _backupUrlIndex = 0;
                         _currentMedia = BuildMedia(streamResult);
                         _currentVideoPath = query;
                         _mediaPlayer.Play(_currentMedia);
@@ -494,6 +506,41 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         if (streamResult.HttpHeaders.TryGetValue("Referer", out string referer))
             media.AddOption($":http-referrer={referer}");
 
+        if (streamResult.HttpHeaders.TryGetValue("User-Agent", out string userAgent))
+            media.AddOption($":http-user-agent={userAgent}");
+
+        // Bilibili CDN resilience options.
+        // Important: do NOT use prefetch-buffer-size — it opens parallel HTTP connections
+        // which Bilibili's CDN rate-limits immediately, causing the burst of Stream closed
+        // errors visible at the start of playback. Single-connection streaming is required.
+        bool isBilibili = streamResult.VideoUrl.Contains("bilivideo.com") ||
+                          streamResult.VideoUrl.Contains("akamaized.net");
+        if (isBilibili)
+        {
+            // Buffer 5 seconds of data — enough to absorb brief CDN throttling without
+            // opening extra connections the way prefetch-buffer-size does
+            media.AddOption(":network-caching=5000");
+
+            // Automatically retry broken connections instead of treating them as EOF
+            media.AddOption(":http-reconnect");
+
+            // Tolerate timestamp discontinuities after reconnections — without this,
+            // VLC desynchronizes its internal clock on reconnect and drops frames
+            media.AddOption(":clock-jitter=0");
+            media.AddOption(":clock-synchro=0");
+        }
+
+        // Backup CDN URLs — passed as additional input slaves so VLC can fall back
+        // if the primary node drops the connection mid-stream
+        if (streamResult.HttpHeaders.TryGetValue("X-Backup-Urls", out string backupUrlsRaw))
+        {
+            foreach (string backupUrl in backupUrlsRaw.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                media.AddOption($":input-slave={backupUrl}");
+        }
+
+        // Note: LibVLC cannot send Cookie headers on CDN requests — this is a hard
+        // limitation of the library. Bilibili streams use fnval=1 (MP4/durl) which
+        // embeds auth in the URL query params, so no Cookie header is needed.
         if (!string.IsNullOrWhiteSpace(streamResult.AudioUrl))
             media.AddOption($":input-slave={streamResult.AudioUrl}");
 
@@ -983,6 +1030,46 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
 
     private void OnError(object sender, EventArgs e)
     {
+        // Attempt CDN failover before declaring playback dead.
+        // Bilibili streams can fail mid-play when the CDN node drops the TLS session.
+        // The API returns backup CDN URLs — try them in order before giving up.
+        if (_backupUrls.Count > 0 && _backupUrlIndex < _backupUrls.Count && _currentStreamResult != null)
+        {
+            string backupUrl = _backupUrls[_backupUrlIndex++];
+            TerraVision.instance.Logger.Warn(
+                $"[Failover] Primary stream failed, trying backup URL {_backupUrlIndex}/{_backupUrls.Count}");
+
+            var failoverResult = new VideoStreamResult
+            {
+                VideoUrl = backupUrl,
+                AudioUrl = _currentStreamResult.AudioUrl,
+                IsLivestream = _currentStreamResult.IsLivestream
+            };
+            foreach (var kv in _currentStreamResult.HttpHeaders)
+                failoverResult.HttpHeaders[kv.Key] = kv.Value;
+            // Remove backup URL list from the failover result — we manage iteration ourselves
+            failoverResult.HttpHeaders.Remove("X-Backup-Urls");
+
+            Main.QueueMainThreadAction(() =>
+            {
+                try
+                {
+                    _currentMedia?.Dispose();
+                    _currentMedia = BuildMedia(failoverResult);
+                    _mediaPlayer.Play(_currentMedia);
+                    TerraVision.instance.Logger.Info("[Failover] Switched to backup CDN URL");
+                }
+                catch (Exception ex)
+                {
+                    TerraVision.instance.Logger.Error($"[Failover] Failed to switch to backup URL: {ex.Message}");
+                    _isPlaying = false;
+                    _isPreparing = false;
+                    PlaybackError?.Invoke(this, EventArgs.Empty);
+                }
+            });
+            return;
+        }
+
         _isPlaying = false;
         _isPreparing = false;
         PlaybackError?.Invoke(this, EventArgs.Empty);

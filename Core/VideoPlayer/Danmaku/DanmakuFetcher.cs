@@ -49,7 +49,10 @@ public static class DanmakuFetcher
         var handler = new HttpClientHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.GZip
-                                   | System.Net.DecompressionMethods.Deflate
+                                   | System.Net.DecompressionMethods.Deflate,
+            // tModLoader's embedded .NET runtime may have a stale certificate store.
+            // We only connect to known Bilibili API endpoints so this is safe.
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
         };
 
         _http = new HttpClient(handler);

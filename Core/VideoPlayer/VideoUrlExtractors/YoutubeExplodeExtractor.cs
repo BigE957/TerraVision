@@ -24,8 +24,10 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
     {
         try
         {
-            var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(15);
+            var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(15)
+            };
             _youtube = new YoutubeClient(httpClient);
 
             TerraVision.instance.Logger.Info("YoutubeExplode initialized successfully");

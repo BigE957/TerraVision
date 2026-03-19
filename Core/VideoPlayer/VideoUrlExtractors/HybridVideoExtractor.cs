@@ -13,6 +13,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
 {
     private readonly YtDlExtractor _ytdlp;
     private readonly YoutubeExplodeExtractor _youtubeExplode;
+    private readonly BilibiliExtractor _bilibili;
 
     private bool _isInitialized = false;
 
@@ -27,6 +28,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
     {
         _ytdlp = new();
         _youtubeExplode = new();
+        _bilibili = new();
     }
 
     public async Task<bool> InitializeAsync()
@@ -66,9 +68,30 @@ public class HybridVideoExtractor : IVideoUrlExtractor
 
         if (isBilibili)
         {
+            // Strategy 1: BilibiliExtractor — direct DASH stream URLs via API
+            // Fast path: no download or merge needed, VLC plays the streams directly.
+            // Requires saved cookies (SESSDATA) for best quality; degrades to 720p without.
+            try
+            {
+                TerraVision.instance.Logger.Info("Bilibili URL — attempting direct stream extraction");
+                VideoStreamResult streamResult = await _bilibili.GetDirectUrlAsync(url, cancellationToken);
+                if (streamResult != null)
+                {
+                    TerraVision.instance.Logger.Info("Bilibili direct stream extraction successful");
+                    return streamResult;
+                }
+                TerraVision.instance.Logger.Debug("Bilibili direct extraction returned null, falling back to download");
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                TerraVision.instance.Logger.Debug($"Bilibili direct extraction failed: {ex.Message}, falling back to download");
+            }
+
+            // Strategy 2: yt-dlp download + merge (original slow path, guaranteed to work)
             if (_ytdlp.IsAvailable)
             {
-                TerraVision.instance.Logger.Info("Bilibili URL — downloading and merging via yt-dlp");
+                TerraVision.instance.Logger.Info("Bilibili URL — falling back to yt-dlp download");
                 string localPath = await _ytdlp.DownloadToTempAsync(url, cancellationToken);
                 if (localPath != null)
                     return new VideoStreamResult { VideoUrl = localPath };
@@ -110,10 +133,8 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
         }
 
-        // Strategy 1.5: Quick livestream check if yt-dlp is available.
-        // This catches livestreams with normal /watch URLs.
-        // Fix 5: When confirmed live, flag the result so VideoUrlHelper can skip its own
-        // redundant IsLivestreamAsync call and apply the correct (short) cache duration.
+        // Strategy 1.5: Quick livestream check if yt-dlp is available
+        // This catches livestreams with normal /watch URLs
         if (_ytdlp.IsAvailable)
         {
             try
@@ -122,10 +143,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
                 if (isLive)
                 {
                     TerraVision.instance.Logger.Info("Livestream detected by metadata check, using yt-dlp");
-                    VideoStreamResult liveResult = await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
-                    if (liveResult != null)
-                        liveResult.IsLivestream = true;
-                    return liveResult;
+                    return await _ytdlp.GetDirectUrlAsync(url, cancellationToken);
                 }
             }
             catch
@@ -229,10 +247,12 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                // User cancelled, propagate
                 throw;
             }
             catch (OperationCanceledException)
             {
+                // Timeout, try fallback - use Debug level
                 TerraVision.instance.Logger.Debug("YoutubeExplode search timed out, trying yt-dlp fallback");
             }
             catch (Exception ex)
@@ -279,7 +299,7 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             {
                 TerraVision.instance.Logger.Info($"Fetching playlist with YoutubeExplode (fast method): {playlistId}");
 
-                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20)); // Playlists may take longer
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
                 var result = await _youtubeExplode.GetPlaylistVideosAsync(playlistId, linkedCts.Token);
@@ -292,10 +312,12 @@ public class HybridVideoExtractor : IVideoUrlExtractor
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                // User cancelled, propagate
                 throw;
             }
             catch (OperationCanceledException)
             {
+                // Timeout, try fallback - use Debug level
                 TerraVision.instance.Logger.Debug("YoutubeExplode playlist fetch timed out, trying yt-dlp fallback");
             }
             catch (Exception ex)
@@ -351,9 +373,9 @@ public class HybridVideoExtractor : IVideoUrlExtractor
     public string GetActiveExtractor()
     {
         if (_ytdlp.IsAvailable && _youtubeExplode.IsAvailable)
-            return "YoutubeExplode (primary) + yt-dlp (fallback/livestreams)";
+            return "YoutubeExplode (YouTube) + BilibiliExtractor (Bilibili) + yt-dlp (fallback/livestreams)";
         if (_ytdlp.IsAvailable)
-            return "yt-dlp only";
+            return "BilibiliExtractor (Bilibili) + yt-dlp only";
         if (_youtubeExplode.IsAvailable)
             return "YoutubeExplode only";
         return "None available";
