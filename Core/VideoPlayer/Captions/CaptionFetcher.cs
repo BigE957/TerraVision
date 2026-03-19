@@ -104,8 +104,7 @@ public static partial class CaptionFetcher
     /// Tries manual captions first, then auto-generated.
     /// Returns an empty list if no captions are available.
     /// </summary>
-    public static async Task<List<CaptionBlock>> FetchYouTubeAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    public static async Task<List<CaptionBlock>> FetchYouTubeAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -146,8 +145,7 @@ public static partial class CaptionFetcher
     /// Falls back through browsers in Auto mode, then gives up gracefully.
     /// Output is SRT (yt-dlp converts Bilibili's JSON format automatically).
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -204,22 +202,18 @@ public static partial class CaptionFetcher
             catch { }
 
             string found = FindSubtitleFile(tempDir);
-            if (found != null) return found;
+            if (found != null)
+                return found;
 
             // Distinguish "auth failed" from "video genuinely has no subtitles".
             // If stderr contains login-related text, our cookies may be stale — fall
             // through to browser detection. If stderr is clean, the video simply has
             // no subtitles and there is nothing browser cookies could add.
-            bool authError = folderStderr != null && (
-                folderStderr.Contains("login", StringComparison.OrdinalIgnoreCase) ||
-                folderStderr.Contains("not logged", StringComparison.OrdinalIgnoreCase) ||
-                folderStderr.Contains("cookies", StringComparison.OrdinalIgnoreCase) ||
-                folderStderr.Contains("authentication", StringComparison.OrdinalIgnoreCase));
+            bool authError = folderStderr != null && (folderStderr.Contains("login", StringComparison.OrdinalIgnoreCase) || folderStderr.Contains("not logged", StringComparison.OrdinalIgnoreCase) || folderStderr.Contains("cookies", StringComparison.OrdinalIgnoreCase) || folderStderr.Contains("authentication", StringComparison.OrdinalIgnoreCase));
 
             if (!authError)
             {
-                TerraVision.instance.Logger.Debug(
-                    "[Captions/Bilibili] No subtitles found (video has none, not an auth issue)");
+                TerraVision.instance.Logger.Debug("[Captions/Bilibili] No subtitles found (video has none, not an auth issue)");
                 return null;
             }
 
@@ -237,8 +231,7 @@ public static partial class CaptionFetcher
             try { await RunYtDlpAsync(ytdlpPath, baseArgs, token); }
             catch (OperationCanceledException) { throw; }
             catch { }
-            return
-                FindSubtitleFile(tempDir);
+            return FindSubtitleFile(tempDir);
         }
 
         foreach (string browserArg in browserCascade)
@@ -273,8 +266,6 @@ public static partial class CaptionFetcher
             TerraVision.instance.Logger.Debug($"[Captions/Bilibili] No subtitles from {browserArg}, trying next...");
         }
 
-        TerraVision.instance.Logger.Info("[Captions/Bilibili] No captions found — Bilibili subtitles require being logged in via a supported browser (see TerraVision mod settings)");
-
         return null;
     }
 
@@ -283,8 +274,7 @@ public static partial class CaptionFetcher
     /// Vimeo subtitles are user-uploaded standard VTT — no auto-generated option.
     /// No login is required for public content.
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchVimeoAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchVimeoAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -323,10 +313,6 @@ public static partial class CaptionFetcher
             return [];
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Generic fallback — any yt-dlp-supported site
-    // -------------------------------------------------------------------------
 
     /// <summary>
     /// Generic caption fetch for any yt-dlp-supported URL that isn't
@@ -387,16 +373,20 @@ public static partial class CaptionFetcher
         }
     }
 
-    private static async Task<string> DownloadYouTubeSubtitleAsync(
-        string url, string ytdlpPath, string langCode, CancellationToken token)
+    private static async Task<string> DownloadYouTubeSubtitleAsync(string url, string ytdlpPath, string langCode, CancellationToken token)
     {
         string tempDir = GetTempDir();
         string outputTemplate = Path.Combine(tempDir, "%(id)s.%(ext)s");
 
-        // Inject cookies if available — unlocks age-restricted and members-only videos
-        string cookieArg = CookieManager.GetCookiesArg(url) ?? "";
+        // Use saved cookies file only — not browser auto-detection.
+        // Most YouTube captions are publicly accessible without auth; browser cookies
+        // are only needed for age-restricted or members-only content. Using browser
+        // detection here causes all 4 attempts to fail with database-lock errors when
+        // the browser is open, wasting ~15 seconds before giving up.
+        // Users who need YouTube auth should run /tvsetup cookies youtube.com.
+        string cookieArg = CookieManager.GetFolderCookiesArg(url) ?? "";
         if (!string.IsNullOrEmpty(cookieArg))
-            TerraVision.instance.Logger.Debug("[Captions/YouTube] Using cookies for auth");
+            TerraVision.instance.Logger.Debug("[Captions/YouTube] Using saved cookies for auth");
 
         string[] attempts =
         {
@@ -426,9 +416,18 @@ public static partial class CaptionFetcher
         for (int i = 0; i < attempts.Length; i++)
         {
             ClearSubtitleFiles(tempDir);
-            try { await RunYtDlpAsync(ytdlpPath, attempts[i], token); }
+            string stderr = null;
+            try { stderr = await RunYtDlpCaptureStderrAsync(ytdlpPath, attempts[i], token); }
             catch (OperationCanceledException) { throw; }
             catch { }
+
+            // If the browser database is locked, all remaining attempts will hit the same
+            // error — bail immediately and guide the user to save their cookies.
+            if (stderr != null && stderr.Contains("Could not copy") && stderr.Contains("cookie database"))
+            {
+                TerraVision.instance.Logger.Debug("[Captions/YouTube] Browser cookie database locked — skipping remaining attempts. Run /tvsetup cookies youtube.com to save cookies persistently.");
+                return null;
+            }
 
             // Pass langCode so that when --sub-langs all downloads multiple files,
             // we still prefer the user's language over an arbitrary first match.
@@ -519,8 +518,10 @@ public static partial class CaptionFetcher
     private static string FindVttFile(string directory, string preferredLang)
     {
         var files = Directory.GetFiles(directory, "*.vtt");
-        if (files.Length == 0) return null;
-        if (files.Length == 1) return files[0];
+        if (files.Length == 0)
+            return null;
+        if (files.Length == 1)
+            return files[0];
 
         // Prefer the user's language if specified
         if (!string.IsNullOrEmpty(preferredLang))
@@ -530,7 +531,8 @@ public static partial class CaptionFetcher
                 string trimmed = lang.Trim();
                 var match = files.FirstOrDefault(f =>
                     Path.GetFileName(f).Contains(trimmed, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match;
+                if (match != null)
+                    return match;
             }
         }
 
@@ -541,7 +543,8 @@ public static partial class CaptionFetcher
             return !name.Contains(".auto.", StringComparison.OrdinalIgnoreCase) &&
                    !name.Contains("-auto.", StringComparison.OrdinalIgnoreCase);
         });
-        if (manual != null) return manual;
+        if (manual != null)
+            return manual;
 
         return files[0];
     }
@@ -782,8 +785,7 @@ public static partial class CaptionFetcher
                 if (textLines.Count == 0)
                     continue;
 
-                string text = MultiSpaceRegex()
-                    .Replace(string.Join(" ", textLines), " ").Trim();
+                string text = MultiSpaceRegex().Replace(string.Join(" ", textLines), " ").Trim();
                 if (!string.IsNullOrWhiteSpace(text))
                     cues.Add((start, end, text));
 
@@ -811,10 +813,7 @@ public static partial class CaptionFetcher
             string previous = i > 0 ? cues[i - 1].Text : null;
 
             // All words stamped at StartTime — entire line appears at once
-            var words = text
-                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Select(w => new CaptionWord { Text = w, Timestamp = start })
-                .ToList();
+            var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(w => new CaptionWord { Text = w, Timestamp = start }).ToList();
 
             blocks.Add(new CaptionBlock
             {
@@ -856,9 +855,9 @@ public static partial class CaptionFetcher
         try
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
-            if(parts.Length == 3)
+            if (parts.Length == 3)
                 return float.Parse(parts[0]) * 3600f + float.Parse(parts[1]) * 60f + float.Parse(parts[2], c);
-            return  float.Parse(parts[0]) * 60f + float.Parse(parts[1], c);
+            return float.Parse(parts[0]) * 60f + float.Parse(parts[1], c);
         }
         catch { return 0f; }
     }
@@ -920,8 +919,7 @@ public static partial class CaptionFetcher
                 string combined = string.Join("\n",
                     new[] { errText, outText }.Where(s => !string.IsNullOrEmpty(s)));
                 if (!string.IsNullOrEmpty(combined))
-                    TerraVision.instance.Logger.Debug(
-                        $"[Captions] yt-dlp exited with code {process.ExitCode}:\n{combined}");
+                    TerraVision.instance.Logger.Debug($"[Captions] yt-dlp exited with code {process.ExitCode}:\n{combined}");
             }
 
             tcs.TrySetResult(errText);
