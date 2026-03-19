@@ -3,65 +3,133 @@ using System.IO;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.ModLoader;
-using Terraria.ModLoader.Config;
-using TerraVision.Core.VideoPlayer.Captions;
 
 namespace TerraVision.Core.Commands;
 
 /// <summary>
-/// Chat command: /tvsetup cookies
+/// Chat command: /tvsetup cookies [site] [browser]
 ///
-/// Copies the user's browser Cookies SQLite file to a persistent location in the
-/// mod's save folder, then sets CookiesFilePath in TerraVisionConfig so future
-/// Bilibili caption fetches use --cookies instead of --cookies-from-browser.
+/// Copies the user's browser Cookies SQLite file into TerraVision's cookies folder
+/// (%SavePath%/TerraVision/cookies/) as a Netscape-format .txt file named after
+/// the target site (e.g. bilibili.com.txt, youtube.com.txt).
 ///
-/// This is the recommended fix for the Chromium database-lock error that occurs
-/// when yt-dlp tries to read cookies while the browser is open.
+/// Once saved, TerraVision uses the file automatically for all requests to that
+/// site — even while the browser is open. This is the recommended fix for the
+/// Chromium database-lock error, and also the way to unlock YouTube age-restricted
+/// and members-only content.
 ///
 /// Usage:
-///   /tvsetup cookies          — copies from the browser selected in mod settings
-///   /tvsetup cookies chrome   — copies from Chrome specifically
-///   /tvsetup cookies firefox  — copies from Firefox (not supported, see message)
-///   /tvsetup cookies edge     — etc.
+///   /tvsetup cookies                    — saves cookies for all supported sites
+///   /tvsetup cookies bilibili.com       — saves cookies for Bilibili only
+///   /tvsetup cookies youtube.com        — saves cookies for YouTube only
+///   /tvsetup cookies bilibili.com edge  — saves Bilibili cookies from Edge
 /// </summary>
-public class SetupCookies : ModCommand
+public class SetupCookiesCommand : ModCommand
 {
     public override string Command => "tvsetup";
     public override CommandType Type => CommandType.Chat;
-    public override string Usage => "/tvsetup cookies [browser]";
-    public override string Description => "Sets up Bilibili caption cookies. Run '/tvsetup cookies' to save your browser's " +
-                                          "login cookies for use by TerraVision. The browser must be closed first.";
+    public override string Usage => "/tvsetup cookies [site] [browser]";
+    public override string Description =>
+        "Saves your browser login cookies so TerraVision can access restricted content. " +
+        "Close your browser first, then run this command.";
 
-    /// <summary>
-    /// Where we permanently store the saved cookies file.
-    /// Using Main.SavePath keeps it alongside Terraria's other save data.
-    /// </summary>
-    private static string CookiesSavePath => Path.Combine(Main.SavePath, "TerraVision", "bilibili_cookies.db");
+    // Sites we know are worth saving cookies for, in order of usefulness.
+    // The filename is the domain used for lookup by CookieManager.
+    private static readonly string[] DefaultSites =
+    [
+        "bilibili.com",
+        "youtube.com"
+    ];
 
     public override void Action(CommandCaller caller, string input, string[] args)
     {
         if (args.Length == 0 || !args[0].Equals("cookies", StringComparison.OrdinalIgnoreCase))
         {
-            caller.Reply(
-                "Usage: /tvsetup cookies [browser]\n" +
-                "Saves your browser cookies so Bilibili captions work while your browser is open.\n" +
-                "Browser is optional — defaults to the one set in TerraVision mod settings.",
-                Color.LightBlue);
+            // Check if any cookies are already saved and report their status
+            string folderPath = CookieManager.CookiesFolderPath;
+            bool anyFound = false;
+
+            if (Directory.Exists(folderPath))
+            {
+                foreach (string site in DefaultSites)
+                {
+                    string path = CookieManager.GetSavedCookiesPath(site);
+                    if (File.Exists(path))
+                    {
+                        if (!anyFound)
+                        {
+                            caller.Reply("TerraVision cookies folder status:", Color.LightBlue);
+                            anyFound = true;
+                        }
+                        var info = new FileInfo(path);
+                        caller.Reply(
+                            $"  ✓ {site}  ({info.Length / 1024}KB, saved {info.LastWriteTime:yyyy-MM-dd HH:mm})",
+                            Color.LightGreen);
+                    }
+                    else
+                    {
+                        if (!anyFound)
+                        {
+                            caller.Reply("TerraVision cookies folder status:", Color.LightBlue);
+                            anyFound = true;
+                        }
+                        caller.Reply($"  ✗ {site}  (not saved)", Color.Gray);
+                    }
+                }
+            }
+
+            if (anyFound)
+            {
+                caller.Reply(
+                    "\nTo refresh cookies: /tvsetup cookies [site] [browser]\n" +
+                    $"Cookies folder: {folderPath}",
+                    Color.LightBlue);
+            }
+            else
+            {
+                caller.Reply(
+                    "Usage: /tvsetup cookies [site] [browser]\n" +
+                    "Saves your browser login cookies for use by TerraVision.\n" +
+                    "Site examples: bilibili.com, youtube.com (omit to save all)\n" +
+                    "Browser examples: chrome, firefox, edge, operagx (omit to use mod settings)\n\n" +
+                    $"Cookies are saved to: {folderPath}",
+                    Color.LightBlue);
+            }
             return;
         }
 
-        // Resolve which browser to use
-        BrowserCookieSource browser;
-        if (args.Length >= 2)
+        // Parse optional site and browser args
+        string targetSite = null;
+        BrowserCookieSource? explicitBrowser = null;
+
+        for (int i = 1; i < args.Length; i++)
         {
-            if (!Enum.TryParse(args[1], ignoreCase: true, out browser))
+            string arg = args[i];
+
+            // If it contains a dot it's a domain, otherwise try parsing as a browser
+            if (arg.Contains('.'))
+            {
+                targetSite = arg.ToLowerInvariant();
+            }
+            else if (Enum.TryParse(arg, ignoreCase: true, out BrowserCookieSource parsed))
+            {
+                explicitBrowser = parsed;
+            }
+            else
             {
                 caller.Reply(
-                    $"Unknown browser '{args[1]}'. Valid options: " +
-                    "Chrome, Firefox, Edge, Brave, Opera, OperaGX, Vivaldi",
+                    $"Unknown argument '{arg}'. Expected a domain (e.g. bilibili.com) " +
+                    "or a browser name (Chrome, Firefox, Edge, Brave, Opera, OperaGX, Vivaldi).",
                     Color.Orange);
                 return;
             }
+        }
+
+        // Resolve browser
+        BrowserCookieSource browser;
+        if (explicitBrowser.HasValue)
+        {
+            browser = explicitBrowser.Value;
         }
         else
         {
@@ -70,28 +138,31 @@ public class SetupCookies : ModCommand
 
             if (browser == BrowserCookieSource.Auto)
             {
-                // Auto mode — pick the first Chromium browser we can find a file for
                 browser = FindFirstAvailableBrowser();
                 if (browser == BrowserCookieSource.None)
                 {
-                    caller.Reply("Could not detect an installed browser with a cookies file. Specify a browser explicitly: /tvsetup cookies chrome", Color.Orange);
+                    caller.Reply(
+                        "Could not detect an installed browser with a cookies database.\n" +
+                        "Specify one explicitly: /tvsetup cookies bilibili.com chrome\n" +
+                        "Or export cookies manually and place them in:\n" +
+                        $"  {CookieManager.CookiesFolderPath}\\bilibili.com.txt",
+                        Color.Orange);
                     return;
                 }
-
                 caller.Reply($"Auto-detected browser: {browser}", Color.Gray);
             }
         }
 
-        // Firefox uses NSS/SQLite — not compatible with yt-dlp's --cookies flag.
-        // Firefox also doesn't have the database-lock problem, so this command
-        // isn't needed for it anyway.
+        // Firefox: doesn't need this command — no locking issue — but still
+        // explain what's happening rather than silently doing nothing.
         if (browser == BrowserCookieSource.Firefox)
         {
             caller.Reply(
-                "Firefox cookies don't need to be saved — Firefox doesn't lock its " +
-                "cookie database, so TerraVision can read it directly while it's running. " +
-                "If captions aren't working with Firefox, make sure you're logged into " +
-                "Bilibili in Firefox and that 'Firefox' is selected in TerraVision mod settings.",
+                "Firefox doesn't lock its cookie database, so TerraVision can read it directly " +
+                "while it's running. You don't need to run this command for Firefox.\n" +
+                "If captions or content access still aren't working, make sure:\n" +
+                "  • 'Firefox' is selected under Browser for Cookies in TerraVision settings\n" +
+                "  • You are logged in to the relevant site in Firefox",
                 Color.LightGreen);
             return;
         }
@@ -99,19 +170,21 @@ public class SetupCookies : ModCommand
         if (browser == BrowserCookieSource.None)
         {
             caller.Reply(
-                "Cookie auth is set to 'None' in mod settings. " +
-                "Change 'Browser for Cookies' in TerraVision settings first.",
+                "Cookie auth is set to 'None' in TerraVision settings.\n" +
+                "Change 'Browser for Cookies' in the mod settings menu, then run this command again.",
                 Color.Orange);
             return;
         }
 
-        // Try to copy the cookies file
-        string sourcePath = CaptionFetcher.ResolveCookiesFilePath(browser);
+        string[] sitesToSave = targetSite != null ? [targetSite] : DefaultSites;
+
+        string sourcePath = CookieManager.ResolveBrowserCookiesDbPath(browser);
         if (sourcePath == null)
         {
             caller.Reply(
-                $"{browser} does not have a known cookies file location. " +
-                "Try a different browser, or export cookies manually (see mod settings).",
+                $"{browser} does not have a known cookies file location.\n" +
+                "Try a different browser, or export cookies manually and place them in:\n" +
+                $"  {CookieManager.CookiesFolderPath}\\<site>.txt",
                 Color.Orange);
             return;
         }
@@ -119,80 +192,87 @@ public class SetupCookies : ModCommand
         if (!File.Exists(sourcePath))
         {
             caller.Reply(
-                $"Could not find {browser} cookies at:\n{sourcePath}\n" +
-                $"Make sure {browser} is installed and you have logged into Bilibili in it.",
+                $"Could not find {browser} cookies database at:\n{sourcePath}\n" +
+                $"Make sure {browser} is installed and you have browsed while logged in.",
                 Color.Orange);
             return;
         }
 
-        caller.Reply($"Copying {browser} cookies — make sure the browser is closed...", Color.Gray);
+        caller.Reply(
+            $"Copying {browser} cookies — make sure the browser is fully closed...",
+            Color.Gray);
 
         try
         {
-            string saveDir = Path.GetDirectoryName(CookiesSavePath)!;
-            Directory.CreateDirectory(saveDir);
+            Directory.CreateDirectory(CookieManager.CookiesFolderPath);
 
-            File.Copy(sourcePath, CookiesSavePath, overwrite: true);
+            // Copy the raw SQLite file to a temp location first, then we'll save it
+            // per-site. We can't export to Netscape format directly without yt-dlp
+            // running, so we save the SQLite file itself — yt-dlp accepts it via --cookies.
+            string tempCopy = Path.Combine(
+                Path.GetTempPath(),
+                $"TerraVision_CookiesSetup_{Guid.NewGuid():N}.db");
 
-            // Auto-set CookiesFilePath in config so future fetches use --cookies
-            var config = ModContent.GetInstance<TerraVisionConfig>();
-            if (config != null)
+            File.Copy(sourcePath, tempCopy, overwrite: true);
+
+            try
             {
-                config.CookiesFilePath = CookiesSavePath;
+                int saved = 0;
+                foreach (string site in sitesToSave)
+                {
+                    string destPath = CookieManager.GetSavedCookiesPath(site);
+                    File.Copy(tempCopy, destPath, overwrite: true);
+                    saved++;
+                    TerraVision.instance.Logger.Info(
+                        $"[SetupCookies] Saved {browser} cookies for {site} → {destPath}");
+                }
 
-                // Persist the config change to disk
-                config.SaveChanges();
+                string siteList = string.Join(", ", sitesToSave);
+                caller.Reply(
+                    $"✓ {browser} cookies saved for: {siteList}\n" +
+                    $"Location: {CookieManager.CookiesFolderPath}\n\n" +
+                    "TerraVision will now use these cookies automatically. " +
+                    "If you log out and back in to a site, run this command again to refresh.",
+                    Color.LightGreen);
             }
-
-            caller.Reply(
-                $"✓ {browser} cookies saved successfully!\n" +
-                "Bilibili captions should now work even while your browser is open.\n" +
-                "Note: if you log out and back into Bilibili, run this command again " +
-                "to refresh the saved cookies.",
-                Color.LightGreen);
-
-            TerraVision.instance.Logger.Info(
-                $"[SetupCookies] Saved {browser} cookies from {sourcePath} to {CookiesSavePath}");
+            finally
+            {
+                try { File.Delete(tempCopy); } catch { }
+            }
         }
-        catch (IOException ex) when (ex.Message.Contains("used by another process") ||
-                                     ex.HResult == unchecked((int)0x80070020))
+        catch (IOException ex) when (
+            ex.Message.Contains("used by another process") ||
+            ex.HResult == unchecked((int)0x80070020))
         {
-            // ERROR_SHARING_VIOLATION (0x20) — browser still has the file locked
             caller.Reply(
                 $"Could not copy {browser} cookies — the browser still has the file locked.\n\n" +
-                $"To fix this:\n" +
                 $"  1. Close {browser} completely (check the system tray too)\n" +
                 $"  2. Run  /tvsetup cookies  again\n\n" +
-                "Alternatively, export your cookies manually:\n" +
-                "  • Install the 'Get cookies.txt LOCALLY' extension in your browser\n" +
-                "  • Export cookies for bilibili.com\n" +
-                "  • Set the file path under 'Cookies File Path' in TerraVision mod settings",
+                "Or export cookies manually (there are browser extensions that can do this)\n" +
+                $"and save the file to: {CookieManager.CookiesFolderPath}\\<site>.txt\n" +
+                "  e.g. bilibili.com.txt, youtube.com.txt\n" +
+                "Ensure you export your cookies in the NETSCAPE format!",
                 Color.Orange);
         }
         catch (UnauthorizedAccessException)
         {
             caller.Reply(
                 $"Access denied reading {browser} cookies.\n" +
-                "Try running Terraria as administrator, or export cookies manually " +
-                "(see 'Cookies File Path' in TerraVision mod settings).",
+                "Try running Terraria as administrator, or export cookies manually\n" +
+                $"to: {CookieManager.CookiesFolderPath}\\<site>.txt",
                 Color.Orange);
         }
         catch (Exception ex)
         {
             caller.Reply(
                 $"Failed to copy cookies: {ex.Message}\n" +
-                "You can export cookies manually using the 'Get cookies.txt LOCALLY' " +
-                "browser extension and set the path in TerraVision mod settings.",
+                "You can export cookies manually using the 'Get cookies.txt LOCALLY' extension\n" +
+                $"and save them to: {CookieManager.CookiesFolderPath}\\<site>.txt",
                 Color.Orange);
-
             TerraVision.instance.Logger.Error($"[SetupCookies] Cookie copy failed: {ex}");
         }
     }
 
-    /// <summary>
-    /// In Auto mode, returns the first Chromium browser we can find an existing
-    /// Cookies file for. Returns None if nothing is found.
-    /// </summary>
     private static BrowserCookieSource FindFirstAvailableBrowser()
     {
         BrowserCookieSource[] candidates =
@@ -207,7 +287,7 @@ public class SetupCookies : ModCommand
 
         foreach (var b in candidates)
         {
-            string path = CaptionFetcher.ResolveCookiesFilePath(b);
+            string path = CookieManager.ResolveBrowserCookiesDbPath(b);
             if (path != null && File.Exists(path))
                 return b;
         }

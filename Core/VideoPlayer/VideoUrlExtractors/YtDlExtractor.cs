@@ -46,19 +46,9 @@ public class YtDlExtractor : IVideoUrlExtractor
         _ffmpegPath = Path.Combine(ytdlpFolder, GetFfmpegBinaryName());
     }
 
-    private static string GetBinaryName()
-    {
-        return Environment.OSVersion.Platform == PlatformID.Win32NT
-            ? "yt-dlp.exe"
-            : "yt-dlp";
-    }
+    private static string GetBinaryName() => Environment.OSVersion.Platform == PlatformID.Win32NT ? "yt-dlp.exe" : "yt-dlp";
 
-    private static string GetFfmpegBinaryName()
-    {
-        return Environment.OSVersion.Platform == PlatformID.Win32NT
-            ? "ffmpeg.exe"
-            : "ffmpeg";
-    }
+    private static string GetFfmpegBinaryName() => Environment.OSVersion.Platform == PlatformID.Win32NT ? "ffmpeg.exe" : "ffmpeg";
 
     public async Task<bool> InitializeAsync()
     {
@@ -108,7 +98,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             }
 
             // Initialize YoutubeDL instance
-            _ytdl = new YoutubeDL();
+            _ytdl = new();
             _ytdl.YoutubeDLPath = _ytdlpPath;
             _ytdl.OutputFolder = Path.GetTempPath();
 
@@ -292,8 +282,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             tar.Start();
             await tar.WaitForExitAsync();
 
-            string extracted = Directory.GetFiles(tempExtract, "ffmpeg", SearchOption.AllDirectories)
-                .FirstOrDefault(f => !f.EndsWith(".so") && !Path.GetFileName(f).Contains('.'));
+            string extracted = Directory.GetFiles(tempExtract, "ffmpeg", SearchOption.AllDirectories).FirstOrDefault(f => !f.EndsWith(".so") && !Path.GetFileName(f).Contains('.'));
 
             if (extracted == null)
             {
@@ -326,13 +315,11 @@ public class YtDlExtractor : IVideoUrlExtractor
         }
     }
 
-    private async Task<bool> DownloadYtDlpAsync()
+    private static async Task<bool> DownloadYtDlpAsync()
     {
         try
         {
-            string downloadUrl = Environment.OSVersion.Platform == PlatformID.Win32NT
-                ? YTDLP_DOWNLOAD_URL_WINDOWS
-                : YTDLP_DOWNLOAD_URL_LINUX;
+            string downloadUrl = Environment.OSVersion.Platform == PlatformID.Win32NT ? YTDLP_DOWNLOAD_URL_WINDOWS : YTDLP_DOWNLOAD_URL_LINUX;
 
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromMinutes(5);
@@ -408,7 +395,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             }
 
             // Extract the build tag from the version string
-            var match = System.Text.RegularExpressions.Regex.Match(installedVersion, @"version\s+(\S+)");
+            var match = Regex.Match(installedVersion, @"version\s+(\S+)");
             string installedTag = match.Success ? match.Groups[1].Value : installedVersion.Trim();
 
             string latestTag = await GetLatestGitHubReleaseTagAsync("yt-dlp/FFmpeg-Builds");
@@ -498,8 +485,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json");
             httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-            string json = await httpClient.GetStringAsync(
-                $"https://api.github.com/repos/{repo}/releases/latest");
+            string json = await httpClient.GetStringAsync($"https://api.github.com/repos/{repo}/releases/latest");
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             return doc.RootElement.GetProperty("tag_name").GetString();
@@ -521,6 +507,16 @@ public class YtDlExtractor : IVideoUrlExtractor
         try
         {
             var options = new OptionSet() { NoPlaylist = true };
+
+            // Inject cookies if available — unlocks age-restricted/members content
+            // and higher resolutions for Premium accounts (e.g. Bilibili 1080p+)
+            string cookiesPath = CookieManager.GetFolderCookiesPath(url);
+            if (cookiesPath != null)
+            {
+                options.Cookies = cookiesPath;
+                TerraVision.instance.Logger.Debug($"[YtDlp] Using saved cookies for {CookieManager.ExtractDomain(url)}");
+            }
+
             var result = await _ytdl.RunVideoDataFetch(url, ct: cancellationToken, overrideOptions: options);
 
             if (!result.Success || result.Data == null)
@@ -615,54 +611,49 @@ public class YtDlExtractor : IVideoUrlExtractor
 
         try
         {
-            // Use RunRawProcessAsync directly rather than _ytdl.RunVideoPlaylistDownload.
-            // The YtdlSharp wrapper unconditionally appends download-oriented flags
-            // (--external-downloader, -f bestvideo+bestaudio, --print after_move:outfile, etc.)
-            // that are meaningless and harmful for a metadata-only search query.
-            // A clean flat-playlist search only needs:
-            //   --flat-playlist   skip per-video metadata fetch, just enumerate IDs
-            //   --print %(id)s    emit one bare video ID per line, nothing else
-            //   --no-warnings     suppress stderr noise that could bleed into output
-            string escapedQuery = searchQuery.Replace("\"", "\\\"");
-            string args = $"--flat-playlist --print \"%(id)s\" --no-warnings --ignore-config -- \"ytsearch{maxResults}:{escapedQuery}\"";
+            // Use yt-dlp to search YouTube
+            var options = new OptionSet()
+            {
+                FlatPlaylist = true,
+                SkipDownload = true
+            };
+            options.AddCustomOption("--get-id", "");
 
-            string rawOutput = await RunRawProcessAsync(_ytdlpPath, args, cancellationToken);
+            // Search and get video IDs
+            var result = await _ytdl.RunVideoPlaylistDownload($"ytsearch{maxResults}:{searchQuery}", ct: cancellationToken, overrideOptions: options);
 
-            var videoResults = rawOutput?
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim())
-                .Where(line => line.Length > 0
-                    && !line.StartsWith("[")
-                    && !line.StartsWith("WARNING")
-                    && !line.StartsWith("ERROR"))
-                .ToArray();
-
-            if (videoResults == null || videoResults.Length == 0)
+            if (!result.Success || result.Data == null || result.Data.Length == 0)
             {
                 TerraVision.instance.Logger.Warn("yt-dlp search returned no results");
                 return null;
             }
 
+            var videoResults = result.Data;
+
             // Select based on index
             int selectedIndex;
             if (resultIndex == -1)
-            {
                 selectedIndex = Main.rand.Next(videoResults.Length);
-            }
             else if (resultIndex >= videoResults.Length)
-            {
                 selectedIndex = videoResults.Length - 1;
-            }
             else
-            {
                 selectedIndex = resultIndex;
-            }
+            
+            string videoIdOrUrl = videoResults[selectedIndex];
 
-            // %(id)s always emits a bare video ID, never a full URL
-            string videoId = videoResults[selectedIndex];
-            string videoUrl = videoId.StartsWith("http")
-                ? videoId
-                : $"https://youtube.com/watch?v={videoId}";
+            // Check if it's already a full URL or just an ID
+            string videoUrl;
+            if (videoIdOrUrl.StartsWith("http"))
+            {
+                // It's already a URL, extract the ID
+                var match = Regex.Match(videoIdOrUrl, @"[?&]v=([^&]+)");
+                if (match.Success)
+                    videoUrl = $"https://youtube.com/watch?v={match.Groups[1].Value}";
+                else
+                    videoUrl = videoIdOrUrl; // Use as-is
+            }
+            else // It's just an ID
+                videoUrl = $"https://youtube.com/watch?v={videoIdOrUrl}";
 
             TerraVision.instance.Logger.Info($"yt-dlp search found video: {videoUrl}");
             return videoUrl;
@@ -684,7 +675,7 @@ public class YtDlExtractor : IVideoUrlExtractor
         if (!IsAvailable)
         {
             TerraVision.instance.Logger.Warn("yt-dlp not available for GetPlaylistVideosAsync");
-            return new List<string>();
+            return [];
         }
 
         try
@@ -707,31 +698,25 @@ public class YtDlExtractor : IVideoUrlExtractor
             if (!result.Success || result.Data == null || result.Data.Length == 0)
             {
                 TerraVision.instance.Logger.Warn("yt-dlp playlist fetch returned no results");
-                return new List<string>();
+                return [];
             }
 
-            var videoUrls = new List<string>();
+            List<string> videoUrls = [];
             foreach (var item in result.Data)
             {
                 string videoUrl;
                 if (item.StartsWith("http"))
                 {
                     // Already a URL, extract ID and normalize
-                    var match = System.Text.RegularExpressions.Regex.Match(item, @"[?&]v=([^&]+)");
+                    var match = Regex.Match(item, @"[?&]v=([^&]+)");
                     if (match.Success)
-                    {
                         videoUrl = $"https://youtube.com/watch?v={match.Groups[1].Value}";
-                    }
                     else
-                    {
                         videoUrl = item;
-                    }
                 }
-                else
-                {
-                    // Just an ID
+                else // Just an ID
                     videoUrl = $"https://youtube.com/watch?v={item}";
-                }
+
                 videoUrls.Add(videoUrl);
             }
 
@@ -746,7 +731,7 @@ public class YtDlExtractor : IVideoUrlExtractor
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"yt-dlp playlist fetch failed: {ex.Message}");
-            return new List<string>();
+            return [];
         }
     }
 
@@ -810,10 +795,10 @@ public class YtDlExtractor : IVideoUrlExtractor
             TerraVision.instance.Logger.Info($"Downloading and merging {url} to temp file...");
 
             // Record timestamps of existing files so we can identify the new one
-            var existingFiles = Directory.GetFiles(tempDir)
-                .ToDictionary(f => f, f => File.GetLastWriteTimeUtc(f));
+            var existingFiles = Directory.GetFiles(tempDir).ToDictionary(f => f, f => File.GetLastWriteTimeUtc(f));
 
-            string args = $"--no-playlist -f \"bestvideo+bestaudio/best\" " +
+            string cookieArg = CookieManager.GetFolderCookiesArg(url) ?? "";
+            string args = $"{cookieArg} --no-playlist -f \"bestvideo+bestaudio/best\" " +
                           $"--merge-output-format mp4 " +
                           $"-o \"{outputTemplate}\" " +
                           $"--print after_move:filepath " +
@@ -893,8 +878,7 @@ public class YtDlExtractor : IVideoUrlExtractor
             if (process.ExitCode == 0)
                 tcs.TrySetResult(output.ToString());
             else
-                tcs.TrySetException(new Exception(
-                    $"yt-dlp exited with code {process.ExitCode}\n{error}"));
+                tcs.TrySetException(new Exception($"yt-dlp exited with code {process.ExitCode}\n{error}"));
             process.Dispose();
         };
 

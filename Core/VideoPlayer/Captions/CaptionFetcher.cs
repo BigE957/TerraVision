@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Terraria;
 using Terraria.ModLoader;
 using Terraria.ModLoader.Config;
 
@@ -57,10 +56,6 @@ public class CaptionBlock
 
 public static partial class CaptionFetcher
 {
-    // -------------------------------------------------------------------------
-    // Compile-time generated regexes (SYSLIB1045)
-    // -------------------------------------------------------------------------
-
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex InlineTagRegex();
 
@@ -79,10 +74,6 @@ public static partial class CaptionFetcher
     [GeneratedRegex(@"(\d+):(\d{2}):(\d{2})[,.](\d{3})")]
     private static partial Regex SrtTimestampRegex();
 
-    // -------------------------------------------------------------------------
-    // Unified public entry point
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Fetches captions for any supported URL.
     /// Automatically detects the platform and uses the appropriate strategy:
@@ -92,8 +83,7 @@ public static partial class CaptionFetcher
     ///   Other    — Generic yt-dlp attempt, VTT preferred then SRT
     /// Returns an empty list if no captions are available.
     /// </summary>
-    public static async Task<List<CaptionBlock>> FetchAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    public static async Task<List<CaptionBlock>> FetchAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         if (url.Contains("youtube.com") || url.Contains("youtu.be"))
             return await FetchYouTubeAsync(url, ytdlpPath, token);
@@ -107,23 +97,17 @@ public static partial class CaptionFetcher
         return await FetchGenericAsync(url, ytdlpPath, token);
     }
 
-    // -------------------------------------------------------------------------
-    // YouTube (unchanged — word-level VTT)
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Fetches captions for a YouTube URL using yt-dlp.
     /// Tries manual captions first, then auto-generated.
     /// Returns an empty list if no captions are available.
     /// </summary>
-    public static async Task<List<CaptionBlock>> FetchYouTubeAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    public static async Task<List<CaptionBlock>> FetchYouTubeAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
             string langCode = GetLanguageCode();
-            TerraVision.instance.Logger.Info(
-                $"[Captions/YouTube] Fetching for {url} (lang: {langCode})");
+            TerraVision.instance.Logger.Info($"[Captions/YouTube] Fetching for {url} (lang: {langCode})");
 
             string vttPath = await DownloadYouTubeSubtitleAsync(url, ytdlpPath, langCode, token);
 
@@ -141,9 +125,7 @@ public static partial class CaptionFetcher
             // than assuming all YouTube VTTs use the rolling-window format.
             bool hasWordTiming = VttHasWordTiming(vttPath);
             var blocks = hasWordTiming ? ParseYouTubeVtt(vttPath) : ParseSimpleVtt(vttPath);
-            TerraVision.instance.Logger.Info(
-                $"[Captions/YouTube] Loaded {blocks.Count} blocks " +
-                $"({(hasWordTiming ? "word-timed" : "plain VTT")})");
+            TerraVision.instance.Logger.Info($"[Captions/YouTube] Loaded {blocks.Count} blocks ({(hasWordTiming ? "word-timed" : "plain VTT")})");
             return blocks;
         }
         catch (OperationCanceledException) { throw; }
@@ -154,10 +136,6 @@ public static partial class CaptionFetcher
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Bilibili — SRT with browser cookie auth
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Fetches captions for a Bilibili URL.
     /// Bilibili subtitles require a logged-in session, so yt-dlp is invoked
@@ -165,8 +143,7 @@ public static partial class CaptionFetcher
     /// Falls back through browsers in Auto mode, then gives up gracefully.
     /// Output is SRT (yt-dlp converts Bilibili's JSON format automatically).
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -176,27 +153,21 @@ public static partial class CaptionFetcher
             // zh-CN/zh and must be listed explicitly or the filter misses them entirely.
             string primaryLang = GetLanguageCode();
             string zhVariants = "ai-zh,zh-CN,zh";
-            string langCode = primaryLang.Contains("zh")
-                ? $"{primaryLang},{zhVariants}"
-                : $"{primaryLang},ai-en,{zhVariants}";
+            string langCode = primaryLang.Contains("zh") ? $"{primaryLang},{zhVariants}" : $"{primaryLang},ai-en,{zhVariants}";
 
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Bilibili] Fetching for {url} (lang: {langCode})");
+            TerraVision.instance.Logger.Info($"[Captions/Bilibili] Fetching for {url} (lang: {langCode})");
 
             string subPath = await DownloadBilibiliSubtitleAsync(url, ytdlpPath, langCode, token);
 
             if (subPath == null)
             {
-                TerraVision.instance.Logger.Info(
-                    "[Captions/Bilibili] No captions found — Bilibili subtitles require " +
-                    "being logged in via a supported browser (see TerraVision mod settings)");
+                TerraVision.instance.Logger.Info("[Captions/Bilibili] No captions found — Bilibili subtitles require being logged in via a supported browser (see TerraVision mod settings)");
                 return [];
             }
 
             string ext = Path.GetExtension(subPath).ToLowerInvariant();
             var blocks = ext == ".vtt" ? ParseSimpleVtt(subPath) : ParseSrt(subPath);
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Bilibili] Loaded {blocks.Count} blocks from {ext.ToUpperInvariant()}");
+            TerraVision.instance.Logger.Info($"[Captions/Bilibili] Loaded {blocks.Count} blocks from {ext.ToUpperInvariant()}");
             return blocks;
         }
         catch (OperationCanceledException) { throw; }
@@ -207,8 +178,7 @@ public static partial class CaptionFetcher
         }
     }
 
-    private static async Task<string> DownloadBilibiliSubtitleAsync(
-        string url, string ytdlpPath, string langCode, CancellationToken token)
+    private static async Task<string> DownloadBilibiliSubtitleAsync(string url, string ytdlpPath, string langCode, CancellationToken token)
     {
         string tempDir = GetTempDir();
 
@@ -221,37 +191,30 @@ public static partial class CaptionFetcher
             $"-o \"{Path.Combine(tempDir, "%(id)s.%(ext)s")}\" " +
             $"--no-playlist -- \"{url}\"";
 
-        var config = ModContent.GetInstance<TerraVisionConfig>();
-
-        // An explicit cookies.txt path takes priority over browser detection
-        if (!string.IsNullOrWhiteSpace(config?.CookiesFilePath))
+        // --- Step 1: saved cookies folder (takes priority, works while browser is open) ---
+        string folderArg = CookieManager.GetFolderCookiesArg(url);
+        if (folderArg != null)
         {
-            TerraVision.instance.Logger.Debug(
-                "[Captions/Bilibili] Using cookies.txt path from config");
-
-            string cookieFlag = $"--cookies \"{config.CookiesFilePath}\"";
-            await LogAvailableSubsAsync(ytdlpPath, cookieFlag, url, token);
-
+            TerraVision.instance.Logger.Debug("[Captions/Bilibili] Using saved cookies file");
             ClearSubtitleFiles(tempDir);
-            try
-            {
-                await RunYtDlpAsync(
-                    ytdlpPath, $"{cookieFlag} {baseArgs}", token);
-            }
+            try { await RunYtDlpAsync(ytdlpPath, $"{folderArg} {baseArgs}", token); }
             catch (OperationCanceledException) { throw; }
             catch { }
-            return FindSubtitleFile(tempDir);
+
+            string found = FindSubtitleFile(tempDir);
+            if (found != null) return found;
+
+            // File exists but yielded nothing — auth may be stale, fall through to browser
+            TerraVision.instance.Logger.Debug("[Captions/Bilibili] Saved cookies yielded no subtitles, trying browser...");
         }
 
-        // Browser cookie detection
-        BrowserCookieSource browser = config?.BrowserForCookies ?? BrowserCookieSource.Auto;
+        // --- Step 2: browser cookie auto-detection ---
+        string[] browserCascade = CookieManager.GetBrowserCascade();
 
-        if (browser == BrowserCookieSource.None)
+        if (browserCascade.Length == 0)
         {
-            // Attempt without any auth — will almost certainly return nothing for Bilibili,
-            // but worth one try in case the video has public subtitles in the future.
-            TerraVision.instance.Logger.Debug(
-                "[Captions/Bilibili] Cookie auth disabled in config — attempting unauthenticated");
+            // Auth disabled — one unauthenticated attempt in case the video is public
+            TerraVision.instance.Logger.Debug("[Captions/Bilibili] Cookie auth disabled — attempting unauthenticated");
             ClearSubtitleFiles(tempDir);
             try { await RunYtDlpAsync(ytdlpPath, baseArgs, token); }
             catch (OperationCanceledException) { throw; }
@@ -259,27 +222,17 @@ public static partial class CaptionFetcher
             return FindSubtitleFile(tempDir);
         }
 
-        // Determine which browsers to try.
-        // Each entry is resolved via ResolveBrowserCookieArg, which handles the
-        // Opera GX special case (explicit profile path instead of bare browser name).
-        BrowserCookieSource[] browsersToTry = browser == BrowserCookieSource.Auto
-            ? [BrowserCookieSource.Chrome, BrowserCookieSource.Firefox, BrowserCookieSource.Edge]
-            : [browser];
-
-        foreach (BrowserCookieSource b in browsersToTry)
+        foreach (string browserArg in browserCascade)
         {
             token.ThrowIfCancellationRequested();
 
-            string cookieArg = ResolveBrowserCookieArg(b);
-            TerraVision.instance.Logger.Debug(
-                $"[Captions/Bilibili] Trying --cookies-from-browser {cookieArg}");
+            TerraVision.instance.Logger.Debug($"[Captions/Bilibili] Trying --cookies-from-browser {browserArg}");
 
             ClearSubtitleFiles(tempDir);
             string stderr = null;
             try
             {
-                stderr = await RunYtDlpCaptureStderrAsync(
-                    ytdlpPath, $"--cookies-from-browser {cookieArg} {baseArgs}", token);
+                stderr = await RunYtDlpCaptureStderrAsync(ytdlpPath, $"--cookies-from-browser {browserArg} {baseArgs}", token);
             }
             catch (OperationCanceledException) { throw; }
             catch { }
@@ -287,61 +240,22 @@ public static partial class CaptionFetcher
             string found = FindSubtitleFile(tempDir);
             if (found != null)
             {
-                TerraVision.instance.Logger.Info(
-                    $"[Captions/Bilibili] Got subtitles via {b} cookies");
+                TerraVision.instance.Logger.Info($"[Captions/Bilibili] Got subtitles via browser cookies ({browserArg})");
                 return found;
             }
 
-            // Detect the Chromium database-lock error and guide the user to the
-            // /tvsetup cookies command, which copies the cookies file while the
-            // browser is closed and saves it persistently for future use.
             if (stderr != null && stderr.Contains("Could not copy") &&
                 stderr.Contains("cookie database"))
             {
-                TerraVision.instance.Logger.Warn(
-                    $"[Captions/Bilibili] {b} cookie database is locked (browser is open).");
-
-                Main.QueueMainThreadAction(() =>
-                    Main.NewText(
-                        "Bilibili captions: type  /tvsetup cookies  in chat to save your cookies. " +
-                        $"You may need to close {b} first.",
-                        Microsoft.Xna.Framework.Color.Orange));
-
-                // No point trying further browsers if we hit a lock — this is a
-                // per-machine issue, not a browser-selection issue.
+                CookieManager.NotifyDatabaseLocked(browserArg);
                 return null;
             }
 
-            TerraVision.instance.Logger.Debug(
-                $"[Captions/Bilibili] No subtitles from {b}, trying next...");
+            TerraVision.instance.Logger.Debug($"[Captions/Bilibili] No subtitles from {browserArg}, trying next...");
         }
 
         return null;
     }
-
-    /// <summary>
-    /// Resolves a BrowserCookieSource to the argument string for --cookies-from-browser.
-    ///
-    /// Most browsers use their lowercase name. Opera GX requires the "opera:path" syntax
-    /// because yt-dlp only auto-detects regular Opera (Opera Stable) — it doesn't know
-    /// about the GX profile directory. We construct the path using SpecialFolder.ApplicationData
-    /// so it works regardless of Windows username.
-    /// </summary>
-    private static string ResolveBrowserCookieArg(BrowserCookieSource browser)
-    {
-        if (browser == BrowserCookieSource.OperaGX)
-        {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            string gxPath = Path.Combine(appData, "Opera Software", "Opera GX Stable");
-            return $"opera:\"{gxPath}\"";
-        }
-
-        return browser.ToString().ToLowerInvariant();
-    }
-
-    // -------------------------------------------------------------------------
-    // Vimeo — plain VTT (user-uploaded, no word timing)
-    // -------------------------------------------------------------------------
 
     /// <summary>
     /// Fetches captions for a Vimeo URL.
@@ -354,12 +268,12 @@ public static partial class CaptionFetcher
         try
         {
             string langCode = GetLanguageCode();
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Vimeo] Fetching for {url} (lang: {langCode})");
+            TerraVision.instance.Logger.Info($"[Captions/Vimeo] Fetching for {url} (lang: {langCode})");
 
             string tempDir = GetTempDir();
+            string cookieArg = CookieManager.GetCookiesArg(url) ?? "";
             string args =
-                $"--skip-download --write-sub --sub-format vtt/srt/best " +
+                $"{cookieArg} --skip-download --write-sub --sub-format vtt/srt/best " +
                 $"--sub-langs \"{langCode}\" " +
                 $"-o \"{Path.Combine(tempDir, "%(id)s.%(ext)s")}\" " +
                 $"--no-playlist -- \"{url}\"";
@@ -378,8 +292,7 @@ public static partial class CaptionFetcher
 
             string ext = Path.GetExtension(subFile).ToLowerInvariant();
             var blocks = ext == ".vtt" ? ParseSimpleVtt(subFile) : ParseSrt(subFile);
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Vimeo] Loaded {blocks.Count} blocks");
+            TerraVision.instance.Logger.Info($"[Captions/Vimeo] Loaded {blocks.Count} blocks");
             return blocks;
         }
         catch (OperationCanceledException) { throw; }
@@ -390,35 +303,30 @@ public static partial class CaptionFetcher
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Generic fallback — any yt-dlp-supported site
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Generic caption fetch for any yt-dlp-supported URL that isn't
     /// YouTube, Bilibili, or Vimeo. No auth, VTT preferred over SRT.
     /// Low hit rate in practice but adds no complexity for the caller.
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchGenericAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchGenericAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
             string langCode = GetLanguageCode();
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Generic] Attempting fetch for {url} (lang: {langCode})");
+            TerraVision.instance.Logger.Info($"[Captions/Generic] Attempting fetch for {url} (lang: {langCode})");
 
             string tempDir = GetTempDir();
+            string cookieArg = CookieManager.GetCookiesArg(url) ?? "";
             string[] attempts =
             [
                 // Manual subs first
-                $"--skip-download --write-sub --sub-format vtt/srt/best " +
+                $"{cookieArg} --skip-download --write-sub --sub-format vtt/srt/best " +
                 $"--sub-langs \"{langCode}\" " +
                 $"-o \"{Path.Combine(tempDir, "%(id)s.%(ext)s")}\" " +
                 $"--no-playlist -- \"{url}\"",
 
                 // Auto-generated fallback
-                $"--skip-download --write-auto-sub --sub-format vtt/srt/best " +
+                $"{cookieArg} --skip-download --write-auto-sub --sub-format vtt/srt/best " +
                 $"--sub-langs \"{langCode}\" " +
                 $"-o \"{Path.Combine(tempDir, "%(id)s.%(ext)s")}\" " +
                 $"--no-playlist -- \"{url}\""
@@ -437,8 +345,7 @@ public static partial class CaptionFetcher
                 {
                     string ext = Path.GetExtension(found).ToLowerInvariant();
                     var blocks = ext == ".vtt" ? ParseSimpleVtt(found) : ParseSrt(found);
-                    TerraVision.instance.Logger.Info(
-                        $"[Captions/Generic] Loaded {blocks.Count} blocks");
+                    TerraVision.instance.Logger.Info($"[Captions/Generic] Loaded {blocks.Count} blocks");
                     return blocks;
                 }
             }
@@ -454,35 +361,36 @@ public static partial class CaptionFetcher
         }
     }
 
-    // -------------------------------------------------------------------------
-    // YouTube subtitle download helper
-    // -------------------------------------------------------------------------
-
     private static async Task<string> DownloadYouTubeSubtitleAsync(
         string url, string ytdlpPath, string langCode, CancellationToken token)
     {
         string tempDir = GetTempDir();
         string outputTemplate = Path.Combine(tempDir, "%(id)s.%(ext)s");
 
+        // Inject cookies if available — unlocks age-restricted and members-only videos
+        string cookieArg = CookieManager.GetCookiesArg(url) ?? "";
+        if (!string.IsNullOrEmpty(cookieArg))
+            TerraVision.instance.Logger.Debug("[Captions/YouTube] Using cookies for auth");
+
         string[] attempts =
         {
             // 1. Manual captions in the user's language
-            $"--skip-download --write-sub --sub-format vtt " +
+            $"{cookieArg} --skip-download --write-sub --sub-format vtt " +
             $"--sub-langs \"{langCode}\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
 
             // 2. Auto-generated captions in the user's language
-            $"--skip-download --write-auto-sub --sub-format vtt " +
+            $"{cookieArg} --skip-download --write-auto-sub --sub-format vtt " +
             $"--sub-langs \"{langCode}\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
 
             // 3. Any manual captions in any language (e.g. Japanese-only videos)
-            $"--skip-download --write-sub --sub-format vtt " +
+            $"{cookieArg} --skip-download --write-sub --sub-format vtt " +
             $"--sub-langs \"all\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
 
             // 4. Any auto-generated captions in any language
-            $"--skip-download --write-auto-sub --sub-format vtt " +
+            $"{cookieArg} --skip-download --write-auto-sub --sub-format vtt " +
             $"--sub-langs \"all\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\""
         };
@@ -513,10 +421,6 @@ public static partial class CaptionFetcher
         return null;
     }
 
-    // -------------------------------------------------------------------------
-    // Language code helper
-    // -------------------------------------------------------------------------
-
     private static string GetLanguageCode() =>
         Terraria.Localization.Language.ActiveCulture.Name switch
         {
@@ -531,10 +435,6 @@ public static partial class CaptionFetcher
             "pl" => "pl",
             _ => "en"
         };
-
-    // -------------------------------------------------------------------------
-    // File helpers
-    // -------------------------------------------------------------------------
 
     private static string GetTempDir()
     {
@@ -559,8 +459,7 @@ public static partial class CaptionFetcher
     ///     which is used as a visual separator in some Japanese/Asian caption files
     ///     (e.g. the Bad Apple ASCII art captions) and is NOT caught by string.IsNullOrEmpty.
     /// </summary>
-    private static bool IsVttCueSeparator(string line)
-        => string.IsNullOrEmpty(line) || line.All(c => char.IsWhiteSpace(c));
+    private static bool IsVttCueSeparator(string line) => string.IsNullOrEmpty(line) || line.All(c => char.IsWhiteSpace(c));
 
     /// <summary>
     /// Returns true if the VTT file uses YouTube's word-level timing format
@@ -576,7 +475,7 @@ public static partial class CaptionFetcher
             foreach (string line in File.ReadLines(filePath, System.Text.Encoding.UTF8))
             {
                 if (line.Contains("<c>") || line.Contains("</c>") ||
-                    System.Text.RegularExpressions.Regex.IsMatch(line, @"<\d+:\d{2}:\d{2}\.\d{3}>"))
+                    Regex.IsMatch(line, @"<\d+:\d{2}:\d{2}\.\d{3}>"))
                     return true;
                 if (++linesRead >= 200) break;
             }
@@ -585,8 +484,7 @@ public static partial class CaptionFetcher
         return false;
     }
 
-    private static string FindVttFile(string directory)
-        => FindVttFile(directory, preferredLang: null);
+    private static string FindVttFile(string directory) => FindVttFile(directory, preferredLang: null);
 
     /// <summary>
     /// Finds the best VTT file in the directory.
@@ -598,8 +496,10 @@ public static partial class CaptionFetcher
     private static string FindVttFile(string directory, string preferredLang)
     {
         var files = Directory.GetFiles(directory, "*.vtt");
-        if (files.Length == 0) return null;
-        if (files.Length == 1) return files[0];
+        if (files.Length == 0)
+            return null;
+        if (files.Length == 1)
+            return files[0];
 
         // Prefer the user's language if specified
         if (!string.IsNullOrEmpty(preferredLang))
@@ -609,7 +509,8 @@ public static partial class CaptionFetcher
                 string trimmed = lang.Trim();
                 var match = files.FirstOrDefault(f =>
                     Path.GetFileName(f).Contains(trimmed, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match;
+                if (match != null)
+                    return match;
             }
         }
 
@@ -617,10 +518,10 @@ public static partial class CaptionFetcher
         var manual = files.FirstOrDefault(f =>
         {
             string name = Path.GetFileName(f);
-            return !name.Contains(".auto.", StringComparison.OrdinalIgnoreCase) &&
-                   !name.Contains("-auto.", StringComparison.OrdinalIgnoreCase);
+            return !name.Contains(".auto.", StringComparison.OrdinalIgnoreCase) && !name.Contains("-auto.", StringComparison.OrdinalIgnoreCase);
         });
-        if (manual != null) return manual;
+        if (manual != null)
+            return manual;
 
         return files[0];
     }
@@ -632,12 +533,7 @@ public static partial class CaptionFetcher
     }
 
     /// <summary>Returns the first subtitle file found, VTT preferred over SRT.</summary>
-    private static string FindSubtitleFile(string directory)
-        => FindVttFile(directory) ?? FindSrtFile(directory);
-
-    // -------------------------------------------------------------------------
-    // Parser: YouTube VTT (word-level timing, rolling two-line window)
-    // -------------------------------------------------------------------------
+    private static string FindSubtitleFile(string directory) => FindVttFile(directory) ?? FindSrtFile(directory);
 
     /// <summary>
     /// Parses a YouTube auto-generated WebVTT file into CaptionBlocks.
@@ -759,10 +655,6 @@ public static partial class CaptionFetcher
         return blocks;
     }
 
-    // -------------------------------------------------------------------------
-    // Parser: plain VTT (Vimeo, generic — no word-level timing)
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Parses a standard single-cue WebVTT file (Vimeo, generic sites) into CaptionBlocks.
     /// Unlike YouTube's rolling-window format, each VTT cue here is a standalone subtitle.
@@ -827,10 +719,6 @@ public static partial class CaptionFetcher
         return BuildBlocksFromCues(cues);
     }
 
-    // -------------------------------------------------------------------------
-    // Parser: SRT (Bilibili, Dailymotion, generic)
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Parses a standard SRT subtitle file into CaptionBlocks.
     /// SRT has no word-level timing, so all words in a block appear simultaneously
@@ -874,8 +762,7 @@ public static partial class CaptionFetcher
                 if (textLines.Count == 0)
                     continue;
 
-                string text = MultiSpaceRegex()
-                    .Replace(string.Join(" ", textLines), " ").Trim();
+                string text = MultiSpaceRegex().Replace(string.Join(" ", textLines), " ").Trim();
                 if (!string.IsNullOrWhiteSpace(text))
                     cues.Add((start, end, text));
 
@@ -888,17 +775,12 @@ public static partial class CaptionFetcher
         return BuildBlocksFromCues(cues);
     }
 
-    // -------------------------------------------------------------------------
-    // Shared block builder for non-YouTube formats
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Converts a flat list of (start, end, text) cues into CaptionBlocks.
     /// All words in each block get Timestamp = StartTime (instant reveal).
     /// The previous cue's text is stored as PreviousSentence for two-line display.
     /// </summary>
-    private static List<CaptionBlock> BuildBlocksFromCues(
-        List<(float Start, float End, string Text)> cues)
+    private static List<CaptionBlock> BuildBlocksFromCues(List<(float Start, float End, string Text)> cues)
     {
         var blocks = new List<CaptionBlock>(cues.Count);
 
@@ -927,10 +809,6 @@ public static partial class CaptionFetcher
         return blocks;
     }
 
-    // -------------------------------------------------------------------------
-    // YouTube word-level parsing helpers
-    // -------------------------------------------------------------------------
-
     private static List<CaptionWord> ParseWords(string rawText, float cueStart)
     {
         var words = new List<CaptionWord>();
@@ -951,10 +829,6 @@ public static partial class CaptionFetcher
         return words;
     }
 
-    // -------------------------------------------------------------------------
-    // Timestamp parsers
-    // -------------------------------------------------------------------------
-
     private static float ParseVttTime(string timestamp)
     {
         string[] parts = timestamp.Replace(',', '.').Split(':');
@@ -974,7 +848,8 @@ public static partial class CaptionFetcher
     private static float ParseSrtTime(string timestamp)
     {
         var m = SrtTimestampRegex().Match(timestamp);
-        if (!m.Success) return 0f;
+        if (!m.Success)
+            return 0f;
         try
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
@@ -986,24 +861,17 @@ public static partial class CaptionFetcher
         catch { return 0f; }
     }
 
-    // -------------------------------------------------------------------------
-    // Process runner
-    // -------------------------------------------------------------------------
-
     /// <summary>
     /// Runs a yt-dlp process and waits for it to exit.
     /// Logs all output at Debug level on non-zero exit.
     /// </summary>
-    private static async Task RunYtDlpAsync(
-        string ytdlpPath, string arguments, CancellationToken token)
-        => await RunYtDlpCaptureStderrAsync(ytdlpPath, arguments, token);
+    private static async Task RunYtDlpAsync(string ytdlpPath, string arguments, CancellationToken token) => await RunYtDlpCaptureStderrAsync(ytdlpPath, arguments, token);
 
     /// <summary>
     /// Runs yt-dlp and returns captured stderr. Also logs stdout+stderr together
     /// at Debug level on any non-zero exit so nothing is silently swallowed.
     /// </summary>
-    private static async Task<string> RunYtDlpCaptureStderrAsync(
-        string ytdlpPath, string arguments, CancellationToken token)
+    private static async Task<string> RunYtDlpCaptureStderrAsync(string ytdlpPath, string arguments, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<string>();
         var stdout = new System.Text.StringBuilder();
@@ -1035,11 +903,9 @@ public static partial class CaptionFetcher
 
             if (process.ExitCode != 0)
             {
-                string combined = string.Join("\n",
-                    new[] { errText, outText }.Where(s => !string.IsNullOrEmpty(s)));
+                string combined = string.Join("\n", new[] { errText, outText }.Where(s => !string.IsNullOrEmpty(s)));
                 if (!string.IsNullOrEmpty(combined))
-                    TerraVision.instance.Logger.Debug(
-                        $"[Captions] yt-dlp exited with code {process.ExitCode}:\n{combined}");
+                    TerraVision.instance.Logger.Debug($"[Captions] yt-dlp exited with code {process.ExitCode}:\n{combined}");
             }
 
             tcs.TrySetResult(errText);
@@ -1058,93 +924,5 @@ public static partial class CaptionFetcher
         {
             return await tcs.Task;
         }
-    }
-
-    /// <summary>
-    /// Runs yt-dlp --list-subs and logs the available subtitle tracks at Info level.
-    /// This is a pure diagnostic pass — it writes nothing to disk.
-    /// Lets us see in the log exactly what languages/formats Bilibili is offering,
-    /// so we can tell whether the issue is "no subs", "wrong lang code", or auth.
-    /// </summary>
-    private static async Task LogAvailableSubsAsync(
-        string ytdlpPath, string cookieFlag, string url, CancellationToken token)
-    {
-        try
-        {
-            var tcs = new TaskCompletionSource<string>();
-            var output = new System.Text.StringBuilder();
-
-            var process = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = ytdlpPath,
-                    Arguments = $"{cookieFlag} --list-subs --no-playlist -- \"{url}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    StandardOutputEncoding = System.Text.Encoding.UTF8,
-                    StandardErrorEncoding = System.Text.Encoding.UTF8
-                },
-                EnableRaisingEvents = true
-            };
-
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
-            process.Exited += (_, _) =>
-            {
-                process.WaitForExit();
-                tcs.TrySetResult(output.ToString().Trim());
-                process.Dispose();
-            };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            string result;
-            using (token.Register(() =>
-            {
-                try { process.Kill(); } catch { }
-                tcs.TrySetCanceled();
-            }))
-            {
-                result = await tcs.Task;
-            }
-
-            TerraVision.instance.Logger.Info(
-                $"[Captions/Bilibili] Available subtitles for {url}:\n{result}");
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            TerraVision.instance.Logger.Debug(
-                $"[Captions/Bilibili] --list-subs diagnostic failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Returns the path to the Cookies SQLite file for a given Chromium-based browser,
-    /// or null if the browser isn't installed or the path can't be determined.
-    /// Internal so SetupCookiesCommand can use it when saving cookies.
-    /// </summary>
-    internal static string ResolveCookiesFilePath(BrowserCookieSource browser)
-    {
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-
-        string profileDir = browser switch
-        {
-            BrowserCookieSource.Chrome => Path.Combine(local, "Google", "Chrome", "User Data", "Default", "Network"),
-            BrowserCookieSource.Edge => Path.Combine(local, "Microsoft", "Edge", "User Data", "Default", "Network"),
-            BrowserCookieSource.Brave => Path.Combine(local, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Network"),
-            BrowserCookieSource.Opera => Path.Combine(roaming, "Opera Software", "Opera Stable", "Network"),
-            BrowserCookieSource.OperaGX => Path.Combine(roaming, "Opera Software", "Opera GX Stable", "Network"),
-            BrowserCookieSource.Vivaldi => Path.Combine(local, "Vivaldi", "User Data", "Default", "Network"),
-            _ => null
-        };
-
-        return profileDir == null ? null : Path.Combine(profileDir, "Cookies");
     }
 }

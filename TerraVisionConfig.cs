@@ -4,14 +4,14 @@ using Terraria.ModLoader.Config;
 namespace TerraVision;
 
 /// <summary>
-/// Which browser yt-dlp should read login cookies from for caption fetching.
-/// Only relevant for platforms that require login to access subtitles (e.g. Bilibili).
+/// Which browser yt-dlp should read login cookies from as a fallback when no
+/// saved cookies file exists in the TerraVision cookies folder.
 /// </summary>
 public enum BrowserCookieSource
 {
     /// <summary>
     /// Try Chrome, Firefox, then Edge in sequence.
-    /// The first browser that successfully yields subtitles is used.
+    /// The first browser that successfully yields data is used.
     /// </summary>
     Auto,
 
@@ -27,8 +27,8 @@ public enum BrowserCookieSource
     Vivaldi,
 
     /// <summary>
-    /// Never attempt to read browser cookies.
-    /// Bilibili captions will be unavailable without cookies.
+    /// Never attempt to read browser cookies automatically.
+    /// Only saved cookies files in the TerraVision cookies folder will be used.
     /// </summary>
     None
 }
@@ -39,35 +39,28 @@ public class TerraVisionConfig : ModConfig
     public override ConfigScope Mode => ConfigScope.ClientSide;
 
     // -------------------------------------------------------------------------
-    // Caption settings
+    // Cookie settings
     // -------------------------------------------------------------------------
 
-    [Header("Captions")]
+    [Header("Cookies")]
 
     [Label("Browser for Cookies")]
     [Tooltip(
-        "Which browser yt-dlp should read login cookies from when fetching captions.\n" +
-        "Required for platforms that need a login to access subtitles (e.g. Bilibili).\n" +
-        "Select the browser you use to log into video sites.\n\n" +
+        "Which browser TerraVision should read login cookies from automatically.\n" +
+        "Used as a fallback when no saved cookies file exists for a site.\n\n" +
+        "Cookies unlock features that require a login:\n" +
+        "  • Bilibili: captions, higher resolutions (Premium)\n" +
+        "  • YouTube: age-restricted videos, members-only content\n\n" +
         "'Auto' tries Chrome, Firefox, then Edge in sequence.\n" +
-        "'Opera GX' is listed separately from Opera — pick the right one for your install.\n" +
-        "'None' disables cookie-based auth entirely (Bilibili captions will be unavailable).\n\n" +
-        "Note: Chromium-based browsers (Chrome, Edge, Opera, Brave) may fail to share\n" +
-        "cookies while the browser is open due to database locking. Firefox does not\n" +
-        "have this limitation and is the most reliable choice if captions are important."
+        "'Opera GX' is listed separately from Opera — pick the right one.\n" +
+        "'None' disables automatic browser reading entirely.\n\n" +
+        "Tip: For the most reliable experience, run  /tvsetup cookies  in chat\n" +
+        "to save your cookies to the TerraVision cookies folder. Saved cookies\n" +
+        "work even while your browser is open and apply to all supported sites.\n\n" +
+        "Note: Chromium-based browsers (Chrome, Edge, Opera, Brave) may fail\n" +
+        "while the browser is open due to database locking. Firefox does not\n" +
+        "have this limitation."
     )]
     [DefaultValue(BrowserCookieSource.Auto)]
     public BrowserCookieSource BrowserForCookies { get; set; } = BrowserCookieSource.Auto;
-
-    [Label("Cookies File Path (Advanced)")]
-    [Tooltip(
-        "Optional: path to a Netscape-format cookies.txt file exported from your browser.\n" +
-        "If set, this takes priority over the 'Browser for Cookies' setting above.\n" +
-        "Leave blank to use the browser setting instead.\n\n" +
-        "Example: C:\\Users\\you\\Desktop\\cookies.txt\n\n" +
-        "You can export a cookies.txt from Chrome or Firefox using the\n" +
-        "'Get cookies.txt LOCALLY' browser extension."
-    )]
-    [DefaultValue("")]
-    public string CookiesFilePath { get; set; } = "";
 }

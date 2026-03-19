@@ -57,7 +57,11 @@ Items: {
 Configs: {
 	TerraVisionConfig: {
 		DisplayName: TerraVision Settings
-		Headers.Captions: Captions
+
+		Headers: {
+			Captions: Captions
+			Cookies: Cookies Header
+		}
 
 		BrowserForCookies: {
 			Label: Browser for Cookies
