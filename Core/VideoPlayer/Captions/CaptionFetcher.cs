@@ -46,6 +46,13 @@ public class CaptionBlock
     /// calculation so the caption box doesn't shift as words are revealed.
     /// </summary>
     public string FullSentence { get; set; }
+
+    /// <summary>
+    /// When true, the block's text contains intentional newlines (e.g. ASCII art
+    /// captions, multi-line plain VTT cues) that must not be reflowed.
+    /// The renderer will scale the content to fit rather than word-wrapping it.
+    /// </summary>
+    public bool IsPreformatted { get; init; }
 }
 
 public static partial class CaptionFetcher
@@ -127,8 +134,16 @@ public static partial class CaptionFetcher
             }
 
             TerraVision.instance.Logger.Info($"[Captions/YouTube] Parsing {Path.GetFileName(vttPath)}");
-            var blocks = ParseYouTubeVtt(vttPath);
-            TerraVision.instance.Logger.Info($"[Captions/YouTube] Loaded {blocks.Count} blocks");
+
+            // YouTube's auto-generated VTT uses word-level <c> timing tags.
+            // Manually uploaded captions (and special videos like ASCII art) do not —
+            // they're plain single-cue VTTs. Route based on actual file content rather
+            // than assuming all YouTube VTTs use the rolling-window format.
+            bool hasWordTiming = VttHasWordTiming(vttPath);
+            var blocks = hasWordTiming ? ParseYouTubeVtt(vttPath) : ParseSimpleVtt(vttPath);
+            TerraVision.instance.Logger.Info(
+                $"[Captions/YouTube] Loaded {blocks.Count} blocks " +
+                $"({(hasWordTiming ? "word-timed" : "plain VTT")})");
             return blocks;
         }
         catch (OperationCanceledException) { throw; }
@@ -150,7 +165,8 @@ public static partial class CaptionFetcher
     /// Falls back through browsers in Auto mode, then gives up gracefully.
     /// Output is SRT (yt-dlp converts Bilibili's JSON format automatically).
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchBilibiliAsync(
+        string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -450,16 +466,28 @@ public static partial class CaptionFetcher
 
         string[] attempts =
         {
+            // 1. Manual captions in the user's language
             $"--skip-download --write-sub --sub-format vtt " +
             $"--sub-langs \"{langCode}\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
 
+            // 2. Auto-generated captions in the user's language
             $"--skip-download --write-auto-sub --sub-format vtt " +
             $"--sub-langs \"{langCode}\" " +
+            $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
+
+            // 3. Any manual captions in any language (e.g. Japanese-only videos)
+            $"--skip-download --write-sub --sub-format vtt " +
+            $"--sub-langs \"all\" " +
+            $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\"",
+
+            // 4. Any auto-generated captions in any language
+            $"--skip-download --write-auto-sub --sub-format vtt " +
+            $"--sub-langs \"all\" " +
             $"-o \"{outputTemplate}\" --no-playlist -- \"{url}\""
         };
 
-        string[] labels = ["manual", "auto-generated"];
+        string[] labels = ["manual", "auto-generated", "manual (any language)", "auto-generated (any language)"];
 
         for (int i = 0; i < attempts.Length; i++)
         {
@@ -468,7 +496,9 @@ public static partial class CaptionFetcher
             catch (OperationCanceledException) { throw; }
             catch { }
 
-            string vttFile = FindVttFile(tempDir);
+            // Pass langCode so that when --sub-langs all downloads multiple files,
+            // we still prefer the user's language over an arbitrary first match.
+            string vttFile = FindVttFile(tempDir, langCode);
             if (vttFile != null)
             {
                 TerraVision.instance.Logger.Info(
@@ -520,10 +550,79 @@ public static partial class CaptionFetcher
                 try { File.Delete(f); } catch { }
     }
 
+    /// <summary>
+    /// Returns true if a line should be treated as a VTT cue separator —
+    /// i.e. the end of a cue's text block. Handles:
+    ///   - Truly empty lines
+    ///   - Lines containing only ASCII whitespace
+    ///   - Lines containing only Unicode whitespace like U+3000 (IDEOGRAPHIC SPACE),
+    ///     which is used as a visual separator in some Japanese/Asian caption files
+    ///     (e.g. the Bad Apple ASCII art captions) and is NOT caught by string.IsNullOrEmpty.
+    /// </summary>
+    private static bool IsVttCueSeparator(string line)
+        => string.IsNullOrEmpty(line) || line.All(c => char.IsWhiteSpace(c));
+
+    /// <summary>
+    /// Returns true if the VTT file uses YouTube's word-level timing format
+    /// (i.e. contains &lt;c&gt; tags or inline timestamp tags like &lt;00:00:00.000&gt;).
+    /// Used to decide whether to route to ParseYouTubeVtt or ParseSimpleVtt.
+    /// Reads only the first 200 lines to avoid loading the whole file.
+    /// </summary>
+    private static bool VttHasWordTiming(string filePath)
+    {
+        try
+        {
+            int linesRead = 0;
+            foreach (string line in File.ReadLines(filePath, System.Text.Encoding.UTF8))
+            {
+                if (line.Contains("<c>") || line.Contains("</c>") ||
+                    System.Text.RegularExpressions.Regex.IsMatch(line, @"<\d+:\d{2}:\d{2}\.\d{3}>"))
+                    return true;
+                if (++linesRead >= 200) break;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private static string FindVttFile(string directory)
+        => FindVttFile(directory, preferredLang: null);
+
+    /// <summary>
+    /// Finds the best VTT file in the directory.
+    /// When multiple files exist (--sub-langs all), prefers:
+    ///   1. A file whose name contains the preferred language code
+    ///   2. A file that doesn't look auto-generated (no ".auto." or "-auto." in name)
+    ///   3. The first file found
+    /// </summary>
+    private static string FindVttFile(string directory, string preferredLang)
     {
         var files = Directory.GetFiles(directory, "*.vtt");
-        return files.Length > 0 ? files[0] : null;
+        if (files.Length == 0) return null;
+        if (files.Length == 1) return files[0];
+
+        // Prefer the user's language if specified
+        if (!string.IsNullOrEmpty(preferredLang))
+        {
+            foreach (string lang in preferredLang.Split(','))
+            {
+                string trimmed = lang.Trim();
+                var match = files.FirstOrDefault(f =>
+                    Path.GetFileName(f).Contains(trimmed, StringComparison.OrdinalIgnoreCase));
+                if (match != null) return match;
+            }
+        }
+
+        // Prefer manual (non-auto) tracks
+        var manual = files.FirstOrDefault(f =>
+        {
+            string name = Path.GetFileName(f);
+            return !name.Contains(".auto.", StringComparison.OrdinalIgnoreCase) &&
+                   !name.Contains("-auto.", StringComparison.OrdinalIgnoreCase);
+        });
+        if (manual != null) return manual;
+
+        return files[0];
     }
 
     private static string FindSrtFile(string directory)
@@ -700,19 +799,27 @@ public static partial class CaptionFetcher
             i++;
 
             var textLines = new List<string>();
-            while (i < lines.Length && !string.IsNullOrEmpty(lines[i].Trim()))
+            while (i < lines.Length && !IsVttCueSeparator(lines[i]))
             {
-                string cleaned = InlineTagRegex().Replace(lines[i].Trim(), "").Trim();
-                if (!string.IsNullOrEmpty(cleaned))
-                    textLines.Add(cleaned);
+                // Strip HTML inline tags but preserve all other characters including
+                // Unicode, Braille, and full-width characters used in ASCII art captions.
+                string cleaned = InlineTagRegex().Replace(lines[i], "").TrimEnd();
+                textLines.Add(cleaned);
                 i++;
             }
+
+            // Trim leading/trailing blank lines but keep internal structure
+            while (textLines.Count > 0 && string.IsNullOrWhiteSpace(textLines[0]))
+                textLines.RemoveAt(0);
+            while (textLines.Count > 0 && string.IsNullOrWhiteSpace(textLines[^1]))
+                textLines.RemoveAt(textLines.Count - 1);
 
             if (textLines.Count == 0)
                 continue;
 
-            string text = MultiSpaceRegex()
-                .Replace(string.Join(" ", textLines), " ").Trim();
+            // Join with newline — preserves ASCII art frame layout and multi-line subtitles.
+            // The renderer's WrapText already handles line breaks correctly.
+            string text = string.Join("\n", textLines);
             if (!string.IsNullOrWhiteSpace(text))
                 cues.Add((start, end, text));
         }
@@ -812,7 +919,8 @@ public static partial class CaptionFetcher
                 EndTime = end,
                 Words = words,
                 PreviousSentence = previous,
-                FullSentence = text
+                FullSentence = text,
+                IsPreformatted = text.Contains('\n')
             });
         }
 

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Graphics;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -13,12 +14,16 @@ public partial class CaptionRenderer
 {
     private List<CaptionBlock> _captions = [];
 
-    private const float TextScale = 0.85f;
+    private const float BaseTextScale = 0.85f;
     private const float PaddingX = 12f;
     private const float PaddingY = 8f;
     private const float BottomMargin = 24f;
     private const float BackgroundAlpha = 0.6f;
     private const float LineSpacing = 2f;
+
+    // Minimum scale before we let content clip rather than making it unreadable.
+    // Braille/ASCII art becomes illegible below ~0.3.
+    private const float MinScale = 0.3f;
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
@@ -37,62 +42,148 @@ public partial class CaptionRenderer
             return;
 
         var font = FontAssets.MouseText.Value;
-        float lineH = font.MeasureString("A").Y * TextScale + LineSpacing;
+
+        if (active.IsPreformatted)
+            DrawPreformatted(spriteBatch, font, videoRect, active, currentTime, pixel);
+        else
+            DrawWordWrapped(spriteBatch, font, videoRect, active, currentTime, pixel);
+    }
+
+
+    private static void DrawPreformatted(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel)
+    {
+        string text = BuildCurrentLine(active, currentTime);
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        string[] lines = text.Split('\n');
+
+        float availW = videoRect.Width - PaddingX * 4f;
+        float availH = videoRect.Height - PaddingY * 4f - BottomMargin;
+
+        // Measure at base scale — use a non-empty placeholder for blank lines
+        // so MeasureString doesn't return zero height and throw off line count.
+        float naturalLineH = font.MeasureString("A").Y * BaseTextScale + LineSpacing;
+        float naturalW = lines.Max(l =>
+            font.MeasureString(string.IsNullOrEmpty(l) ? " " : l).X * BaseTextScale);
+        float naturalH = lines.Length * naturalLineH;
+
+        // Compute the scale needed to fit width and height, then take the smaller.
+        // Clamp to [MinScale, BaseTextScale] — never enlarge, never go illegible.
+        float scaleW = naturalW > availW ? (availW * BaseTextScale) / naturalW : BaseTextScale;
+        float scaleH = naturalH > availH ? (availH * BaseTextScale) / naturalH : BaseTextScale;
+        float scale = MathHelper.Clamp(MathF.Min(scaleW, scaleH), MinScale, BaseTextScale);
+
+        float lineH = font.MeasureString("A").Y * scale + LineSpacing;
+        float blockW = lines.Max(l =>
+            font.MeasureString(string.IsNullOrEmpty(l) ? " " : l).X * scale);
+        float blockH = lines.Length * lineH + PaddingY * 2f;
+
+        float blockX = videoRect.X + (videoRect.Width - blockW) / 2f;
+        float blockY = videoRect.Bottom - BottomMargin - blockH;
+
+        // Background
+        spriteBatch.Draw(pixel,
+            new Rectangle(
+                (int)(blockX - PaddingX),
+                (int)(blockY - PaddingY),
+                (int)(blockW + PaddingX * 2f),
+                (int)blockH),
+            Color.Black * BackgroundAlpha);
+
+        // Draw each line left-aligned within the block
+        float currentY = blockY;
+        foreach (string line in lines)
+        {
+            if (!string.IsNullOrEmpty(line))
+                Utils.DrawBorderString(spriteBatch, line,
+                    new Vector2(blockX, currentY), Color.White, scale);
+            currentY += lineH;
+        }
+    }
+
+    private static void DrawWordWrapped(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel)
+    {
+        float scale = BaseTextScale;
+        float lineH = font.MeasureString("A").Y * scale + LineSpacing;
         float maxWidth = videoRect.Width - PaddingX * 4f;
 
         // Bottom: words revealed progressively by timestamp
         string visibleText = BuildCurrentLine(active, currentTime);
-        var bottomLines = string.IsNullOrWhiteSpace(visibleText) ? [] : WrapText(font, visibleText, maxWidth, TextScale);
+        var bottomLines = string.IsNullOrWhiteSpace(visibleText)
+            ? (List<string>)[]
+            : WrapText(font, visibleText, maxWidth, scale);
 
         // Top: previous completed sentence
-        var topLines = string.IsNullOrWhiteSpace(active.PreviousSentence) ? [] : WrapText(font, active.PreviousSentence, maxWidth, TextScale);
+        var topLines = string.IsNullOrWhiteSpace(active.PreviousSentence)
+            ? (List<string>)[]
+            : WrapText(font, active.PreviousSentence, maxWidth, scale);
 
         int totalLines = topLines.Count + bottomLines.Count;
         if (totalLines == 0)
             return;
 
-        // Use FullSentence for stable box width — prevents shifting as words appear
-        string measureText = !string.IsNullOrWhiteSpace(active.FullSentence) ? active.FullSentence : string.Join(" ", active.Words.Select(w => w.Text));
+        // Use FullSentence for stable box width — prevents the box shifting as words appear
+        string measureText = !string.IsNullOrWhiteSpace(active.FullSentence)
+            ? active.FullSentence
+            : string.Join(" ", active.Words.Select(w => w.Text));
 
-        var bottomLinesFull = WrapText(font, measureText, maxWidth, TextScale);
-        float stableWidth = bottomLinesFull.Count > 0 ? bottomLinesFull.Max(l => font.MeasureString(l).X * TextScale) : 0f;
+        var bottomLinesFull = WrapText(font, measureText, maxWidth, scale);
+        float stableWidth = bottomLinesFull.Count > 0
+            ? bottomLinesFull.Max(l => font.MeasureString(l).X * scale)
+            : 0f;
 
-        float actualMaxWidth = topLines.Count > 0 ? MathHelper.Max(stableWidth, topLines.Max(l => font.MeasureString(l).X * TextScale)) : stableWidth;
+        float actualMaxWidth = topLines.Count > 0
+            ? MathHelper.Max(stableWidth, topLines.Max(l => font.MeasureString(l).X * scale))
+            : stableWidth;
 
         float blockHeight = totalLines * lineH + PaddingY * 2f;
         float blockY = videoRect.Bottom - BottomMargin - blockHeight;
 
-        // Background box
-        Rectangle bgBox = new((int)(videoRect.X + (videoRect.Width - actualMaxWidth) / 2f - PaddingX), (int)(blockY - PaddingY), (int)(actualMaxWidth + PaddingX * 2f), (int)blockHeight);
-        spriteBatch.Draw(pixel, bgBox, Color.Black * BackgroundAlpha);
+        spriteBatch.Draw(pixel,
+            new Rectangle(
+                (int)(videoRect.X + (videoRect.Width - actualMaxWidth) / 2f - PaddingX),
+                (int)(blockY - PaddingY),
+                (int)(actualMaxWidth + PaddingX * 2f),
+                (int)blockHeight),
+            Color.Black * BackgroundAlpha);
 
         float currentY = blockY;
 
-        // Previous sentence — slightly dimmed to visually separate from current line
+        // Previous sentence — slightly dimmed
         foreach (string line in topLines)
         {
             float lineX = videoRect.X +
-                (videoRect.Width - font.MeasureString(line).X * TextScale) / 2f;
+                (videoRect.Width - font.MeasureString(line).X * scale) / 2f;
             Utils.DrawBorderString(spriteBatch, line,
-                new Vector2(lineX, currentY), Color.White * 0.75f, TextScale);
+                new Vector2(lineX, currentY), Color.White * 0.75f, scale);
             currentY += lineH;
         }
 
-        // Current building line — left aligned so words grow rightward, full brightness
+        // Current building line — left-aligned so words grow rightward
         float leftEdge = videoRect.X + (videoRect.Width - actualMaxWidth) / 2f;
         foreach (string line in bottomLines)
         {
             Utils.DrawBorderString(spriteBatch, line,
-                new Vector2(leftEdge, currentY), Color.White, TextScale);
+                new Vector2(leftEdge, currentY), Color.White, scale);
             currentY += lineH;
         }
     }
 
     /// <summary>
-    /// Returns words from the block whose timestamp is at or before currentTime,
-    /// joined into a string. Grows word-by-word as the video plays.
+    /// Returns the visible caption text for the current time.
+    /// Preformatted blocks: returns FullSentence directly (preserving newlines).
+    /// Word-timed blocks: returns only the words whose timestamp has been reached.
     /// </summary>
-    private static string BuildCurrentLine(CaptionBlock block, float currentTime) => string.Join(" ", block.Words.Where(w => w.Timestamp <= currentTime).Select(w => w.Text));
+    private static string BuildCurrentLine(CaptionBlock block, float currentTime)
+    {
+        if (block.IsPreformatted)
+            return block.FullSentence ?? string.Join("\n", block.Words.Select(w => w.Text));
+
+        return string.Join(" ", block.Words
+            .Where(w => w.Timestamp <= currentTime)
+            .Select(w => w.Text));
+    }
 
     /// <summary>
     /// Binary search for the caption block active at currentTime.
@@ -118,29 +209,36 @@ public partial class CaptionRenderer
 
     /// <summary>
     /// Word-wraps text to fit within maxWidth at the given scale.
+    /// Respects hard newlines — each \n-delimited segment is wrapped independently,
+    /// preserving intentional line breaks in manually authored captions.
     /// </summary>
     private static List<string> WrapText(DynamicSpriteFont font, string text, float maxWidth, float scale)
     {
         List<string> result = [];
-        string[] words = WhitespaceRegex().Split(text.Trim());
-        string current = "";
 
-        foreach (string word in words)
+        foreach (string segment in text.Split('\n'))
         {
-            string test = string.IsNullOrEmpty(current) ? word : current + " " + word;
-            float width = font.MeasureString(test).X * scale;
+            string[] words = WhitespaceRegex().Split(segment.Trim());
+            string current = "";
 
-            if (width > maxWidth && !string.IsNullOrEmpty(current))
+            foreach (string word in words)
             {
-                result.Add(current);
-                current = word;
-            }
-            else
-                current = test;
-        }
+                if (string.IsNullOrEmpty(word)) continue;
+                string test = string.IsNullOrEmpty(current) ? word : current + " " + word;
+                float width = font.MeasureString(test).X * scale;
 
-        if (!string.IsNullOrEmpty(current))
-            result.Add(current);
+                if (width > maxWidth && !string.IsNullOrEmpty(current))
+                {
+                    result.Add(current);
+                    current = word;
+                }
+                else
+                    current = test;
+            }
+
+            if (!string.IsNullOrEmpty(current))
+                result.Add(current);
+        }
 
         return result;
     }
