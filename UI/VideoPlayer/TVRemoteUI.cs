@@ -176,23 +176,16 @@ public class TVRemoteUI : UIState
         // Close UI if player moves too far from TV
         if (_currentTV != null)
         {
-            Vector2 tvCenter = new Vector2(
-                (_currentTV.Position.X + 4) * 16f,
-                (_currentTV.Position.Y + 2.5f) * 16f
-            );
+            Vector2 tvCenter = new((_currentTV.Position.X + 4) * 16f, (_currentTV.Position.Y + 2.5f) * 16f);
 
             float distance = Vector2.Distance(Main.LocalPlayer.Center, tvCenter);
             if (distance > 400f) // 25 tiles
-            {
                 ModContent.GetInstance<TVRemoteUISystem>().CloseUI();
-            }
         }
 
         // Close on ESC
         if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Escape))
-        {
             ModContent.GetInstance<TVRemoteUISystem>().CloseUI();
-        }
     }
 }
 
@@ -242,18 +235,12 @@ public class TVRemoteUISystem : ModSystem
         int mouseTextIndex = layers.FindIndex(layer => layer.Name.Equals("Vanilla: Mouse Text"));
         if (mouseTextIndex != -1)
         {
-            layers.Insert(mouseTextIndex, new LegacyGameInterfaceLayer(
-                "CalRemix: TV Remote UI",
-                delegate
-                {
-                    if (_remoteInterface?.CurrentState != null)
-                    {
-                        _remoteInterface.Draw(Main.spriteBatch, new GameTime());
-                    }
-                    return true;
-                },
-                InterfaceScaleType.UI)
-            );
+            layers.Insert(mouseTextIndex, new LegacyGameInterfaceLayer("TerraVision: TV Remote UI", delegate
+            {
+                if (_remoteInterface?.CurrentState != null)
+                    _remoteInterface.Draw(Main.spriteBatch, new GameTime());
+                return true;
+            }, InterfaceScaleType.UI));
         }
     }
 }

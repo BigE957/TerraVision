@@ -7,12 +7,21 @@ using System.Collections.Generic;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ModLoader;
+using Daybreak.Common.Rendering;
 
 namespace TerraVision.Core.VideoPlayer;
 
 public class TVDrawSystem : ModSystem
 {
     private static readonly List<TVTileEntity> _tvsToRender = [];
+
+    private record struct TVCachedData(TVTileEntity Entity, bool NeedsStatic, Effect Shader);
+    private record struct TVDrawEntry(Vector2 Position, Vector2 Size, Rectangle StaticArea, TVTileEntity Entity, bool NeedsStatic, Effect Shader);
+
+    private static readonly List<TVCachedData> _tvCache = [];
+    private static readonly List<TVDrawEntry> _tvData = [];
+
+    private static readonly Dictionary<Effect, List<TVDrawEntry>> _shaderGroups = [];
 
     public static List<TVTileEntity> GetActiveTVs() => _tvsToRender;
 
@@ -24,294 +33,175 @@ public class TVDrawSystem : ModSystem
     public override void UpdateUI(GameTime gameTime)
     {
         _tvsToRender.Clear();
+        _tvCache.Clear();
 
-        Rectangle screenBounds = new(
-            (int)Main.screenPosition.X - 200,
-            (int)Main.screenPosition.Y - 200,
-            Main.screenWidth + 400,
-            Main.screenHeight + 400
-        );
+        Rectangle screenBounds = new((int)Main.screenPosition.X - 200, (int)Main.screenPosition.Y - 200, Main.screenWidth + 400, Main.screenHeight + 400);
 
         foreach (var kvp in TileEntity.ByID)
         {
-            if (kvp.Value is TVTileEntity tvEntity && tvEntity.IsOn)
-            {
-                // Check if TV is on screen
-                Rectangle tvBounds = new Rectangle(
-                    tvEntity.Position.X * 16,
-                    tvEntity.Position.Y * 16,
-                    tvEntity.Size.X * 16,
-                    tvEntity.Size.Y * 16
-                );
+            if (kvp.Value is not TVTileEntity tvEntity || !tvEntity.IsOn)
+                continue;
 
-                if (screenBounds.Intersects(tvBounds))
-                {
-                    _tvsToRender.Add(tvEntity);
-                }
-            }
+            Rectangle tvBounds = new(tvEntity.Position.X * 16, tvEntity.Position.Y * 16, tvEntity.Size.X * 16, tvEntity.Size.Y * 16);
+
+            if (!screenBounds.Intersects(tvBounds))
+                continue;
+
+            _tvsToRender.Add(tvEntity);
+
+            var player = tvEntity.GetVideoPlayer();
+            bool needsStatic = player == null || (!player.IsPlaying && !player.IsLoading && !player.IsPreparing);
+
+            Effect shader = GetShaderForTV(tvEntity);
+
+            _tvCache.Add(new TVCachedData(tvEntity, needsStatic, shader));
         }
     }
 
     private void DrawTVScreens(On_Main.orig_DrawNPCs orig, Main self, bool behindTiles)
     {
-        if (behindTiles)
+        if (behindTiles || _tvCache.Count == 0)
         {
             orig(self, behindTiles);
             return;
         }
 
-        if (_tvsToRender.Count == 0)
-        {
-            orig(self, behindTiles);
-            return;
-        }
+        SpriteBatch sb = Main.spriteBatch;
 
         try
         {
-            // Calculate all screen areas and shader info first
-            var tvData = new List<(
-                Vector2 Position,
-                Vector2 Size,
-                Rectangle StaticArea,
-                TVTileEntity Entity,
-                bool NeedsStatic,
-                Effect Shader
-            )>();
-
-            foreach (var tvEntity in _tvsToRender)
+            // Resolve screen-position-dependent areas now, at actual draw time
+            _tvData.Clear();
+            for (int i = 0; i < _tvCache.Count; i++)
             {
-                var (position, size, staticArea) = tvEntity.CalculateScreenAreas();
-
-                var player = tvEntity.GetVideoPlayer();
-                bool needsStatic = tvEntity.IsOn &&
-                    (player == null || (!player.IsPlaying && !player.IsLoading && !player.IsPreparing));
-
-                // Get shader for this TV type
-                Effect shader = GetShaderForTV(tvEntity);
-
-                tvData.Add((position, size, staticArea, tvEntity, needsStatic, shader));
+                TVCachedData cached = _tvCache[i];
+                var (position, size, staticArea) = cached.Entity.CalculateScreenAreas();
+                _tvData.Add(new TVDrawEntry(position, size, staticArea, cached.Entity, cached.NeedsStatic, cached.Shader));
             }
 
-            // Draw all videos (with shaders if applicable)
-            Main.spriteBatch.End();
+            sb.End(out var scope);
 
-            foreach (var (position, size, staticArea, tvEntity, needsStatic, shader) in tvData)
+            bool noShaderBatchOpen = false;
+
+            for (int i = 0; i < _tvData.Count; i++)
             {
-                if (!needsStatic)
+                TVDrawEntry entry = _tvData[i];
+                if (entry.NeedsStatic || entry.Shader != null)
+                    continue;
+
+                if (!noShaderBatchOpen)
                 {
-                    try
+                    sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer);
+                    noShaderBatchOpen = true;
+                }
+
+                try
+                {
+                    entry.Entity.DrawVideoOrLoading(sb, entry.Position, entry.Size);
+                }
+                catch (Exception ex)
+                {
+                    TerraVision.instance.Logger.Error($"Error drawing video for TV at {entry.Entity.Position}: {ex.Message}");
+                }
+            }
+
+            if (noShaderBatchOpen)
+                sb.End();
+
+            _shaderGroups.Clear();
+
+            for (int i = 0; i < _tvData.Count; i++)
+            {
+                TVDrawEntry entry = _tvData[i];
+                if (entry.NeedsStatic || entry.Shader == null)
+                    continue;
+
+                if (!_shaderGroups.TryGetValue(entry.Shader, out var group))
+                    _shaderGroups[entry.Shader] = group = [];
+
+                group.Add(entry);
+            }
+
+            foreach (var (shader, group) in _shaderGroups)
+            {
+                try
+                {
+                    sb.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, shader);
+
+                    foreach (var entry in group)
                     {
-                        // Start spritebatch with shader (or without if null)
-                        if (shader != null)
+                        try
                         {
-                            // Configure shader parameters
-                            ConfigureShaderForTV(shader, tvEntity);
-
-                            Main.spriteBatch.Begin(
-                                SpriteSortMode.Immediate,
-                                BlendState.AlphaBlend,
-                                Main.DefaultSamplerState,
-                                DepthStencilState.None,
-                                Main.Rasterizer,
-                                shader
-                            );
-
-                            // Apply shader pass
+                            ConfigureShaderForTV(shader, entry.Entity);
                             shader.CurrentTechnique.Passes[0].Apply();
+                            entry.Entity.DrawVideoOrLoading(sb, entry.Position, entry.Size);
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Main.spriteBatch.Begin(
-                                SpriteSortMode.Deferred,
-                                BlendState.AlphaBlend,
-                                Main.DefaultSamplerState,
-                                DepthStencilState.None,
-                                Main.Rasterizer
-                            );
+                            TerraVision.instance.Logger.Error($"Error drawing shaded video for TV at {entry.Entity.Position}: {ex.Message}");
                         }
+                    }
 
-                        tvEntity.DrawVideoOrLoading(Main.spriteBatch, position, size);
-                        Main.spriteBatch.End();
-                    }
-                    catch (Exception ex)
-                    {
-                        TerraVision.instance.Logger.Error($"Error drawing video for TV at {tvEntity.Position}: {ex.Message}");
-                        try { Main.spriteBatch.End(); } catch { }
-                    }
+                    sb.End();
+                }
+                catch (Exception ex)
+                {
+                    TerraVision.instance.Logger.Error($"Error in shader group batch: {ex.Message}");
+                    try { sb.End(); } catch { }
                 }
             }
 
-            // Then draw all static in one batch (with matrix)
-            Main.spriteBatch.Begin(
-                SpriteSortMode.Deferred,
-                BlendState.AlphaBlend,
-                Main.DefaultSamplerState,
-                DepthStencilState.None,
-                Main.Rasterizer,
-                null,
-                Main.GameViewMatrix.TransformationMatrix
-            );
-
-            foreach (var (position, size, staticArea, tvEntity, needsStatic, shader) in tvData)
+            bool hasStatic = false;
+            for (int i = 0; i < _tvData.Count; i++)
             {
-                if (needsStatic)
+                TVDrawEntry entry = _tvData[i];
+                if (entry.NeedsStatic) { hasStatic = true; break; }
+            }
+
+            if (hasStatic)
+            {
+                sb.Begin(scope);
+
+                for (int i = 0; i < _tvData.Count; i++)
                 {
+                    TVDrawEntry entry = _tvData[i];
+                    if (!entry.NeedsStatic)
+                        continue;
+
                     try
                     {
-                        tvEntity.DrawStatic(Main.spriteBatch, staticArea);
+                        entry.Entity.DrawStatic(sb, entry.StaticArea);
                     }
                     catch (Exception ex)
                     {
-                        TerraVision.instance.Logger.Error($"Error drawing static for TV at {tvEntity.Position}: {ex.Message}");
+                        TerraVision.instance.Logger.Error($"Error drawing static for TV at {entry.Entity.Position}: {ex.Message}");
                     }
                 }
+
+                sb.End();
             }
 
+            sb.Begin(scope);
             orig(self, behindTiles);
         }
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"Critical error in DrawTVScreens: {ex.Message}");
-            // Ensure we still call orig to prevent breaking the game
             orig(self, behindTiles);
         }
     }
 
-    public override void PostDrawTiles()
-    {
-        if (_tvsToRender.Count == 0)
-            return;
-
-        SpriteBatch spriteBatch = Main.spriteBatch;
-
-        try
-        {
-            // Calculate all screen areas and shader info first
-            var tvData = new List<(
-                Vector2 Position,
-                Vector2 Size,
-                Rectangle StaticArea,
-                TVTileEntity Entity,
-                bool NeedsStatic,
-                Effect Shader
-            )>();
-
-            foreach (var tvEntity in _tvsToRender)
-            {
-                var (position, size, staticArea) = tvEntity.CalculateScreenAreas();
-
-                var player = tvEntity.GetVideoPlayer();
-                bool needsStatic = tvEntity.IsOn &&
-                    (player == null || (!player.IsPlaying && !player.IsLoading && !player.IsPreparing));
-
-                // Get shader for this TV type
-                Effect shader = GetShaderForTV(tvEntity);
-
-                tvData.Add((position, size, staticArea, tvEntity, needsStatic, shader));
-            }
-
-            // Draw each video with its shader
-            foreach (var (position, size, staticArea, tvEntity, needsStatic, shader) in tvData)
-            {
-                if (!needsStatic)
-                {
-                    try
-                    {
-                        // Start spritebatch with shader (or without if null)
-                        if (shader != null)
-                        {
-                            // Configure shader parameters
-                            ConfigureShaderForTV(shader, tvEntity);
-
-                            spriteBatch.Begin(
-                                SpriteSortMode.Immediate,
-                                BlendState.AlphaBlend,
-                                SamplerState.LinearClamp,
-                                DepthStencilState.None,
-                                RasterizerState.CullNone,
-                                shader
-                            );
-
-                            // Apply shader pass
-                            shader.CurrentTechnique.Passes[0].Apply();
-                        }
-                        else
-                        {
-                            spriteBatch.Begin(
-                                SpriteSortMode.Deferred,
-                                BlendState.AlphaBlend,
-                                SamplerState.LinearClamp,
-                                DepthStencilState.None,
-                                RasterizerState.CullNone
-                            );
-                        }
-
-                        tvEntity.DrawVideoOrLoading(spriteBatch, position, size);
-                        spriteBatch.End();
-                    }
-                    catch (Exception ex)
-                    {
-                        TerraVision.instance.Logger.Error($"Error drawing video for TV at {tvEntity.Position}: {ex.Message}");
-                        try { spriteBatch.End(); } catch { }
-                    }
-                }
-            }
-
-            // Then draw all static in one batch (with matrix)
-            spriteBatch.Begin(
-                SpriteSortMode.Deferred,
-                BlendState.AlphaBlend,
-                SamplerState.LinearClamp,
-                DepthStencilState.None,
-                RasterizerState.CullNone,
-                null,
-                Main.GameViewMatrix.TransformationMatrix
-            );
-
-            foreach (var (position, size, staticArea, tvEntity, needsStatic, shader) in tvData)
-            {
-                if (needsStatic)
-                {
-                    try
-                    {
-                        tvEntity.DrawStatic(spriteBatch, staticArea);
-                    }
-                    catch (Exception ex)
-                    {
-                        TerraVision.instance.Logger.Error($"Error drawing static for TV at {tvEntity.Position}: {ex.Message}");
-                    }
-                }
-            }
-
-            spriteBatch.End();
-        }
-        catch (Exception ex)
-        {
-            TerraVision.instance.Logger.Error($"Critical error in PostDrawTiles: {ex.Message}");
-            // Ensure spritebatch is ended to prevent issues
-            if (spriteBatch != null)
-            {
-                try { spriteBatch.End(); } catch { }
-            }
-        }
-    }
-
     /// <summary>
-    /// Get the shader effect for a TV based on its tile type.
-    /// Returns null if the TV has no shader.
+    /// Returns the shader Effect for the given TV's tile type, or null if none.
     /// </summary>
     private static Effect GetShaderForTV(TVTileEntity tvEntity)
     {
         try
         {
             int tileType = Main.tile[tvEntity.Position.X, tvEntity.Position.Y].TileType;
-            var modTile = TileLoader.GetTile(tileType);
 
-            if (modTile is BaseTVTile baseTVTile)
-            {
-                Asset<Effect> shaderAsset = baseTVTile.GetShaderEffect();
-                return shaderAsset?.Value;
-            }
+            if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile)
+                return baseTVTile.GetShaderEffect()?.Value;
         }
         catch (Exception ex)
         {
@@ -322,20 +212,16 @@ public class TVDrawSystem : ModSystem
     }
 
     /// <summary>
-    /// Configure shader parameters for a TV.
-    /// Calls the tile's ConfigureShader method if available.
+    /// Forwards per-TV shader parameters to the tile's ConfigureShader implementation.
     /// </summary>
     private static void ConfigureShaderForTV(Effect shader, TVTileEntity tvEntity)
     {
         try
         {
             int tileType = Main.tile[tvEntity.Position.X, tvEntity.Position.Y].TileType;
-            var modTile = TileLoader.GetTile(tileType);
 
-            if (modTile is BaseTVTile baseTVTile)
-            {
+            if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile)
                 baseTVTile.ConfigureShader(shader, tvEntity);
-            }
         }
         catch (Exception ex)
         {

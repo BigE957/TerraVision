@@ -1,4 +1,5 @@
-﻿using Microsoft.Xna.Framework;
+﻿using Daybreak.Common.Rendering;
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Graphics;
 using System.Collections.Generic;
@@ -20,15 +21,10 @@ public class DanmakuRenderer
 
     private const float TextScale = 0.75f;
 
-    private float LineHeight => FontAssets.MouseText.Value
-        .MeasureString("A").Y * TextScale + 2f;
+    private float LineHeight => FontAssets.MouseText.Value.MeasureString("A").Y * TextScale + 2f;
 
     // Comments with precomputed lane assignments, set once on load
-    private List<DanmakuComment> _comments = new();
-
-    // -------------------------------------------------------------------------
-    // Lane precomputation — called once when the comment list is fetched
-    // -------------------------------------------------------------------------
+    private List<DanmakuComment> _comments = [];
 
     /// <summary>
     /// Assigns lanes to all comments up front so Draw is purely stateless.
@@ -116,34 +112,35 @@ public class DanmakuRenderer
             return;
 
         var font = FontAssets.MouseText.Value;
-        float lineHeight = LineHeight;
+
+        float playerScale = videoRect.Width / 640f;
+        float scale = TextScale * playerScale;
+
+        float lineHeight = LineHeight * playerScale;
         var graphicsDevice = Main.graphics.GraphicsDevice;
 
         Rectangle previousScissor = graphicsDevice.ScissorRectangle;
-        RasterizerState previousRasterizer = spriteBatch.GraphicsDevice.RasterizerState;
 
         Rectangle clipRect = videoRect;
 
-        Vector2[] corners = {
-            new(clipRect.Left, clipRect.Top),
-            new(clipRect.Right, clipRect.Top),
-            new(clipRect.Left, clipRect.Bottom),
-            new(clipRect.Right, clipRect.Bottom)
-        };
-        for (int i = 0; i < 4; i++)
-            corners[i] = Vector2.Transform(corners[i], Main.UIScaleMatrix);
+        spriteBatch.End(out var scope);
+        var oldScope = scope;
 
-        // Find min/max to create the new AABB
-        Vector2 min = Vector2.Min(Vector2.Min(corners[0], corners[1]), Vector2.Min(corners[2], corners[3]));
-        Vector2 max = Vector2.Max(Vector2.Max(corners[0], corners[1]), Vector2.Max(corners[2], corners[3]));
+        if (scope.TransformMatrix != Matrix.Identity)
+        {
+            Vector2[] corners = [new(clipRect.Left, clipRect.Top), new(clipRect.Right, clipRect.Top), new(clipRect.Left, clipRect.Bottom), new(clipRect.Right, clipRect.Bottom)];
+            for (int i = 0; i < 4; i++)
+                corners[i] = Vector2.Transform(corners[i], Main.UIScaleMatrix);
 
-        clipRect = new Rectangle((int)min.X, (int)min.Y, (int)(max.X - min.X), (int)(max.Y - min.Y));
+            Vector2 min = Vector2.Min(Vector2.Min(corners[0], corners[1]), Vector2.Min(corners[2], corners[3]));
+            Vector2 max = Vector2.Max(Vector2.Max(corners[0], corners[1]), Vector2.Max(corners[2], corners[3]));
 
-        spriteBatch.End();
+            clipRect = new Rectangle((int)min.X, (int)min.Y, (int)(max.X - min.X), (int)(max.Y - min.Y));
+        }  
 
-        var scissorState = new RasterizerState { ScissorTestEnable = true };
+        scope.RasterizerState = new RasterizerState { ScissorTestEnable = true };
         graphicsDevice.ScissorRectangle = clipRect;
-        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, scissorState, null, Main.UIScaleMatrix);
+        spriteBatch.Begin(scope);
 
         foreach (var comment in _comments)
         {
@@ -158,7 +155,7 @@ public class DanmakuRenderer
             if (age > duration)
                 continue;
 
-            float textWidth = font.MeasureString(comment.Text).X * TextScale;
+            float textWidth = font.MeasureString(comment.Text).X * scale;
             float x, y;
 
             switch (comment.Type)
@@ -185,20 +182,15 @@ public class DanmakuRenderer
 
             // Fade out over the last 20% of the comment's lifetime
             float fadeStart = duration * 0.8f;
-            float alpha = age > fadeStart
-                ? 1f - ((age - fadeStart) / (duration - fadeStart))
-                : 1f;
+            float alpha = age > fadeStart ? 1f - ((age - fadeStart) / (duration - fadeStart)) : 1f;
 
-            var color = new Color(
-                (comment.Color >> 16) & 0xFF,
-                (comment.Color >> 8) & 0xFF,
-                 comment.Color & 0xFF) * alpha;
+            var color = new Color((comment.Color >> 16) & 0xFF, (comment.Color >> 8) & 0xFF, comment.Color & 0xFF) * alpha;
 
-            Utils.DrawBorderString(spriteBatch, comment.Text, videoRect.TopLeft() + new Vector2(x, y), color, TextScale);
+            Utils.DrawBorderString(spriteBatch, comment.Text, videoRect.TopLeft() + new Vector2(x, y), color, playerScale);
         }
 
         spriteBatch.End();
         graphicsDevice.ScissorRectangle = previousScissor;
-        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, previousRasterizer, null, Main.UIScaleMatrix);
+        spriteBatch.Begin(oldScope);
     }
 }

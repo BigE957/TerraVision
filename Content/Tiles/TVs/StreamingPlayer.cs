@@ -64,7 +64,7 @@ public class StreamingPlayer : BaseMediaPlayerTile
             return false;
         }
 
-        //ModContent.GetInstance<TVRemoteUISystem>().OpenUI(mediaEntity);
+        ModContent.GetInstance<StreamingUISystem>().ShowUI(mediaEntity);
         return true;
     }
 }
@@ -89,6 +89,6 @@ public class StreamingPlayerItem : ModItem
         Item.consumable = true;
         Item.value = Item.buyPrice(1, 0, 0, 0);
         Item.rare = ItemRarityID.Green;
-        Item.createTile = ModContent.TileType<CassettePlayer>();
+        Item.createTile = ModContent.TileType<StreamingPlayer>();
     }
 }

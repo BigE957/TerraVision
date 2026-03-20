@@ -9,14 +9,15 @@ using Terraria.GameInput;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.UI;
+using TerraVision.Content.Tiles.TVs;
 using TerraVision.Core.VideoPlayer;
 
 namespace TerraVision.UI.VideoPlayer;
 
-public class ExampleVideoPlayerUI : UIState
+public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
 {
     internal DraggableUIPanel _mainPanel;
-    internal VideoPlayerUIElement _videoPlayer;
+    internal MediaPlayerEntity _videoPlayer = entity;
     private UIPanel _controlPanel;
     private UIPanel _urlPanel;
     private UIPanel _timelinePanel;
@@ -39,16 +40,6 @@ public class ExampleVideoPlayerUI : UIState
     private UIText _currentTimeText;
     private UIText _totalTimeText;
 
-    // Resize handle
-    private ResizeHandle _resizeHandle;
-
-    // Dimensions
-    internal float _currentWidth = 800f;
-    internal float _currentHeight = 620f;
-    private const float MIN_WIDTH = 600f;
-    private const float MIN_HEIGHT = 400f;
-    private const float MAX_WIDTH = 1600f;
-    private const float MAX_HEIGHT = 1200f;
 
     private bool _isInitialized = false;
 
@@ -58,15 +49,14 @@ public class ExampleVideoPlayerUI : UIState
 
         // Create draggable main container
         _mainPanel = new DraggableUIPanel();
-        _mainPanel.Width.Set(_currentWidth, 0f);
-        _mainPanel.Height.Set(_currentHeight, 0f);
+        _mainPanel.Width.Set(800, 0f);
+        _mainPanel.Height.Set(240, 0f);
         _mainPanel.HAlign = 0.5f;
-        _mainPanel.VAlign = 0.5f;
+        _mainPanel.VAlign = 0.2f;
         _mainPanel.BackgroundColor = new Color(33, 43, 79) * 0.9f;
 
         _mainPanel.ShouldDrag = () => {
             if (_timelinePanel != null && _timelinePanel.IsMouseHovering) return false;
-            if (_resizeHandle != null && _resizeHandle.IsMouseHovering) return false;
             if (_urlInput != null && _urlInput.IsMouseHovering) return false;
             if (_loadButton != null && _loadButton.IsMouseHovering) return false;
             if (_playButton != null && _playButton.IsMouseHovering) return false;
@@ -79,10 +69,8 @@ public class ExampleVideoPlayerUI : UIState
         Append(_mainPanel);
 
         SetupURLPanel();
-        SetupVideoPlayer();
         SetupTimelinePanel();
         SetupControlPanel();
-        SetupResizeHandle();
 
         _isInitialized = true;
     }
@@ -116,19 +104,6 @@ public class ExampleVideoPlayerUI : UIState
         _loadButton.Top.Set(5, 0f);
         _loadButton.OnLeftClick += OnLoadClicked;
         _urlPanel.Append(_loadButton);
-    }
-
-    private void SetupVideoPlayer()
-    {
-        float videoWidth = _currentWidth - 100;
-        float videoHeight = _currentHeight - 240;
-
-        _videoPlayer = new VideoPlayerUIElement((int)videoWidth, (int)videoHeight, 1280, 720)
-        {
-            HAlign = 0.5f
-        };
-        _videoPlayer.Top.Set(80, 0f);
-        _mainPanel.Append(_videoPlayer);
     }
 
     private void SetupTimelinePanel()
@@ -183,7 +158,7 @@ public class ExampleVideoPlayerUI : UIState
         float relativeX = evt.MousePosition.X - dims.X;
         float percentage = Math.Clamp(relativeX / dims.Width, 0f, 1f);
 
-        _videoPlayer.Seek(percentage);
+        _videoPlayer.player.Seek(percentage);
     }
 
     private void SetupControlPanel()
@@ -198,7 +173,7 @@ public class ExampleVideoPlayerUI : UIState
 
         float buttonSpacing = 10f;
         float buttonWidth = 100f;
-        float panelWidth = _currentWidth - 40;
+        float panelWidth = 760;
         float startX = (panelWidth - (buttonWidth * 4 + buttonSpacing * 3)) / 2;
 
         _playButton = new UITextPanel<string>("Play");
@@ -235,16 +210,6 @@ public class ExampleVideoPlayerUI : UIState
         _controlPanel.Append(_closeButton);
     }
 
-    private void SetupResizeHandle()
-    {
-        _resizeHandle = new ResizeHandle(this);
-        _resizeHandle.Width.Set(20, 0f);
-        _resizeHandle.Height.Set(20, 0f);
-        _resizeHandle.Left.Set(-10, 1f);
-        _resizeHandle.Top.Set(-10, 1f);
-        _mainPanel.Append(_resizeHandle);
-    }
-
     private void OnLoadClicked(UIMouseEvent evt, UIElement listeningElement)
     {
         string input = _urlInput.Text;
@@ -254,18 +219,18 @@ public class ExampleVideoPlayerUI : UIState
             return;
         }
 
-        _videoPlayer.Play(input);
+        _videoPlayer.player.Play(input);
     }
 
     private void OnPlayClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        if (_videoPlayer.IsPaused)
-            _videoPlayer.Resume();
-        else if (!_videoPlayer.IsPlaying)
+        if (_videoPlayer.player.IsPaused)
+            _videoPlayer.player.Resume();
+        else if (!_videoPlayer.player.IsPlaying)
         {
             string input = _urlInput.Text;
             if (!string.IsNullOrWhiteSpace(input))
-                _videoPlayer.Play(input);
+                _videoPlayer.player.Play(input);
             else
                 Main.NewText("Please enter something to play!", Color.Orange);
         }
@@ -273,17 +238,17 @@ public class ExampleVideoPlayerUI : UIState
 
     private void OnPauseClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        _videoPlayer.Pause();
+        _videoPlayer.player.Pause();
     }
 
     private void OnStopClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        _videoPlayer.Stop();
+        _videoPlayer.player.Stop();
     }
 
     private void OnCloseClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        ModContent.GetInstance<ExampleVideoUISystem>().HideUI();
+        ModContent.GetInstance<StreamingUISystem>().HideUI();
     }
 
     public override void Update(GameTime gameTime)
@@ -294,7 +259,7 @@ public class ExampleVideoPlayerUI : UIState
             Main.LocalPlayer.mouseInterface = true;
 
         // Show/hide timeline based on video state
-        bool hasVideo = _videoPlayer != null && (_videoPlayer.IsPlaying || _videoPlayer.IsPaused);
+        bool hasVideo = _videoPlayer != null && (_videoPlayer.player.IsPlaying || _videoPlayer.player.IsPaused);
         if (hasVideo && _timelinePanel.Parent == null)
         {
             _mainPanel.Append(_timelinePanel);
@@ -318,10 +283,10 @@ public class ExampleVideoPlayerUI : UIState
         }
 
         // Update timeline
-        if (_videoPlayer != null && (_videoPlayer.IsPlaying || _videoPlayer.IsPaused))
+        if (_videoPlayer != null && (_videoPlayer.player.IsPlaying || _videoPlayer.player.IsPaused))
         {
-            float position = _videoPlayer.GetPosition();
-            long duration = _videoPlayer.GetDuration();
+            float position = _videoPlayer.player.GetPosition();
+            long duration = _videoPlayer.player.GetDuration();
 
             // Update progress bar
             _timelineProgress.Width.Set(position, 1f);
@@ -340,7 +305,7 @@ public class ExampleVideoPlayerUI : UIState
 
         // ESC to close (only if text input is not active)
         if (Main.keyState.IsKeyDown(Keys.Escape) && !Main.oldKeyState.IsKeyDown(Keys.Escape) && (_urlInput == null || !urlDeactivated))
-            ModContent.GetInstance<ExampleVideoUISystem>().HideUI();
+            ModContent.GetInstance<StreamingUISystem>().HideUI();
     }
 
     private static string FormatTime(long milliseconds)
@@ -354,46 +319,21 @@ public class ExampleVideoPlayerUI : UIState
         return $"{time.Minutes}:{time.Seconds:D2}";
     }
 
-    public void ResizePlayer(float newWidth, float newHeight)
-    {
-        _currentWidth = Math.Clamp(newWidth, MIN_WIDTH, MAX_WIDTH);
-        _currentHeight = Math.Clamp(newHeight, MIN_HEIGHT, MAX_HEIGHT);
-
-        _mainPanel.Width.Set(_currentWidth, 0f);
-        _mainPanel.Height.Set(_currentHeight, 0f);
-
-        // Resize video player
-        float videoWidth = _currentWidth - 100;
-        float videoHeight = _currentHeight - 240;
-        _videoPlayer.Width.Set(videoWidth, 0f);
-        _videoPlayer.Height.Set(videoHeight, 0f);
-        _videoPlayer.Recalculate();
-    }
-
     public void OnClose()
     {
-        if (_videoPlayer != null && !_videoPlayer._isDisposed)
-        {
-            _videoPlayer.Stop();
-            _videoPlayer?.Dispose();
-            ModContent.GetInstance<TerraVision>().Logger.Info("Player disposed in OnClose");
-        }
-
         _urlInput?.Deselect();
-
-        _urlInput?.Text = "";
     }
 }
 
 /// <summary>
 /// System to manage the video player UI state.
 /// </summary>
-public class ExampleVideoUISystem : ModSystem
+public class StreamingUISystem : ModSystem
 {
     internal static Asset<Texture2D> Background;
 
     private UserInterface _videoUserInterface;
-    internal ExampleVideoPlayerUI _videoUI;
+    internal StreamingPlayerUI _videoUI;
 
     public override void Load()
     {
@@ -402,7 +342,7 @@ public class ExampleVideoUISystem : ModSystem
         Background = ModContent.Request<Texture2D>("TerraVision/Assets/ExtraTextures/Pixel");
 
         // Initialize UI components
-        _videoUI = new ExampleVideoPlayerUI();
+        _videoUI = new(null);
         _videoUI.Activate();
         _videoUserInterface = new UserInterface();
     }
@@ -413,13 +353,13 @@ public class ExampleVideoUISystem : ModSystem
         Background = null;
     }
 
-    public void ShowUI()
+    public void ShowUI(MediaPlayerEntity entity)
     {
         // Clear cache when showing UI
         VideoUrlHelper.ClearCache();
 
         // Always create a fresh UI instance
-        _videoUI = new ExampleVideoPlayerUI();
+        _videoUI = new(entity);
         _videoUI.Activate();
 
         _videoUserInterface?.SetState(_videoUI);
@@ -430,14 +370,6 @@ public class ExampleVideoUISystem : ModSystem
         _videoUI?.OnClose();
 
         _videoUserInterface?.SetState(null);
-    }
-
-    public void ToggleUI()
-    {
-        if (_videoUserInterface?.CurrentState != null)
-            HideUI();
-        else
-            ShowUI();
     }
 
     public override void UpdateUI(GameTime gameTime)
@@ -457,32 +389,5 @@ public class ExampleVideoUISystem : ModSystem
                 return true;
             }, InterfaceScaleType.UI));
         }
-    }
-}
-
-/// <summary>
-/// Example item that opens the video player UI.
-/// </summary>
-public class VideoPlayerOpenerItem : ModItem
-{
-    public override string Texture => "TerraVision/Content/Items/TVRemote";
-
-    public override void SetDefaults()
-    {
-        Item.width = 32;
-        Item.height = 32;
-        Item.useStyle = ItemUseStyleID.HoldUp;
-        Item.useTime = 30;
-        Item.useAnimation = 30;
-        Item.rare = ItemRarityID.Blue;
-    }
-
-    public override bool? UseItem(Player player)
-    {
-        if (Main.myPlayer == player.whoAmI)
-        {
-            ModContent.GetInstance<ExampleVideoUISystem>().ShowUI();
-        }
-        return true;
     }
 }
