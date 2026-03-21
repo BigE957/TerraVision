@@ -52,7 +52,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         _mainPanel.Width.Set(800, 0f);
         _mainPanel.Height.Set(240, 0f);
         _mainPanel.HAlign = 0.5f;
-        _mainPanel.VAlign = 0.2f;
+        _mainPanel.VAlign = 0.8f;
         _mainPanel.BackgroundColor = new Color(33, 43, 79) * 0.9f;
 
         _mainPanel.ShouldDrag = () => {

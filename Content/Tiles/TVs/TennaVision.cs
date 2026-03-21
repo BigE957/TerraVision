@@ -4,6 +4,7 @@ using ReLogic.Content;
 using System.Collections.Generic;
 using System.Linq;
 using Terraria;
+using Terraria.Audio;
 using Terraria.DataStructures;
 using Terraria.Enums;
 using Terraria.GameContent;
@@ -134,15 +135,41 @@ public class TennaSystem : ModSystem
 
         List<Point> tennasToKill = [];
 
-        foreach(Point p in Tennas.Keys)
+        foreach (Point p in Tennas.Keys)
         {
             Tennas[p]--;
             if (Tennas[p] < 0)
                 tennasToKill.Add(p);
+            else
+            {
+                Point16 dimensions = ModContent.GetInstance<TennaVision>().GetTVDimensions();
+                TVTileEntity tvEntity = TerraVisionUtils.FindTileEntity<TVTileEntity>(p.X, p.Y, dimensions.X, dimensions.Y, 16);
+
+                if (tvEntity == null)
+                    continue;
+
+                if (tvEntity.IsOn && tvEntity.GetVideoPlayer() != null && (tvEntity.GetVideoPlayer().IsLoading || tvEntity.GetVideoPlayer().IsPreparing))
+                {
+                    int wrappedTime = ((int)(Main.GlobalTimeWrappedHourly * 60)) % 120;
+                    //Main.NewText(wrappedTime);
+                    if (wrappedTime == 0)
+                    {
+                        Vector2 topLeft = p.ToWorldCoordinates(0, 0);
+                        SoundEngine.PlaySound(new("TerraVision/Assets/Sounds/snd_sonar"), topLeft + (dimensions.ToWorldCoordinates() / 2f));
+                        for (int s = -1; s <= 1; s++)
+                        {
+                            float angleOff = MathHelper.PiOver4 * s;
+                            TennaSystem.Particles.Add(new(topLeft + new Vector2(72, 32), Vector2.UnitY.RotatedBy(-MathHelper.PiOver4 + angleOff + Main.rand.NextFloat(-MathHelper.PiOver4 / 4f, MathHelper.PiOver4 / 4f)) * -1, 0.5f));
+                            TennaSystem.Particles.Add(new(topLeft + new Vector2(118, 28), Vector2.UnitY.RotatedBy(MathHelper.PiOver4 + angleOff + Main.rand.NextFloat(-MathHelper.PiOver4 / 4f, MathHelper.PiOver4 / 4f)) * -1, 0.5f));
+                        }
+                    }
+                }
+            }
         }
 
         foreach (Point p in tennasToKill)
             Tennas.Remove(p);
+
     }
 
     public static void DrawTennas()
@@ -190,22 +217,7 @@ public class TennaSystem : ModSystem
                 FrameY = counter % 4;
             }
             else if (player.IsLoading || player.IsPreparing)
-            {
                 FrameX++;
-
-                int wrappedTime = ((int)(Main.GlobalTimeWrappedHourly * 60)) % 120;
-
-                if (wrappedTime == 0)
-                {
-                    Vector2 topLeft = p.ToWorldCoordinates(0, 0);
-                    for (int s = -1; s <= 1; s++)
-                    {
-                        float angleOff = MathHelper.PiOver4 * s;
-                        TennaSystem.Particles.Add(new(topLeft + new Vector2(72, 32), Vector2.UnitY.RotatedBy(-MathHelper.PiOver4 + angleOff + Main.rand.NextFloat(-MathHelper.PiOver4 / 4f, MathHelper.PiOver4 / 4f)) * -1, 0.5f));
-                        TennaSystem.Particles.Add(new(topLeft + new Vector2(118, 28), Vector2.UnitY.RotatedBy(MathHelper.PiOver4 + angleOff + Main.rand.NextFloat(-MathHelper.PiOver4 / 4f, MathHelper.PiOver4 / 4f)) * -1, 0.5f));
-                    }
-                }
-            }
         }
         else
         {
