@@ -19,6 +19,9 @@ public abstract class BaseTVTile : ModTile
     public abstract Point16 GetTVDimensions();
     public abstract string GetTVStyleName();
 
+    public virtual bool UsesStatic() => true;
+    public virtual bool UsesLoadingSpinner() => true;
+
     /// <summary>
     /// Get the shader effect for this TV type.
     /// Return null for no shader (default).
@@ -33,6 +36,8 @@ public abstract class BaseTVTile : ModTile
     /// <param name="shader">The shader effect to configure</param>
     /// <param name="tvEntity">The TV entity being drawn</param>
     public virtual void ConfigureShader(Effect shader, TVTileEntity tvEntity) { }
+
+    public virtual void PostDrawTVScreen(SpriteBatch spritebatch, TVTileEntity tvEntity) { }
 
     public override bool RightClick(int i, int j)
     {

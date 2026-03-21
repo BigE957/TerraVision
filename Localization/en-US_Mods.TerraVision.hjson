@@ -1,13 +1,14 @@
 Tiles: {
-	BoxTVTile.MapEntry: Box T V Tile
+	BoxTVTile.MapEntry: Box TV
 	CassettePlayer.MapEntry: Cassette Player
-	FlatscreenTVTile.MapEntry: Flatscreen T V Tile
+	FlatscreenTVTile.MapEntry: Flatscreen TV
 	StreamingPlayer.MapEntry: Streaming Player
+	TennaVision.MapEntry: Tenna Vision
 }
 
 Items: {
 	TVRemote: {
-		DisplayName: T V Remote
+		DisplayName: TV Remote
 		Tooltip: ""
 	}
 
@@ -52,6 +53,11 @@ Items: {
 		DisplayName: Streaming Player
 		Tooltip: ""
 	}
+
+	TennaVisionItem: {
+		DisplayName: Tenna Vision Item
+		Tooltip: ""
+	}
 }
 
 Configs: {
@@ -60,39 +66,38 @@ Configs: {
 
 		Headers: {
 			Captions: Captions
-			Cookies: Cookies Header
+			Cookies: Cookies
 		}
 
 		BrowserForCookies: {
 			Label: Browser for Cookies
 			Tooltip:
 				'''
-				Which browser yt-dlp should read login cookies from when fetching captions.
-				Required for platforms that need a login to access subtitles (e.g. Bilibili).
-				Select the browser you use to log into video sites.
+				Which browser TerraVision should read login cookies from automatically.
+				Used as a fallback when no saved cookies file exists for a site.
+
+				Cookies unlock features that require a login:
+				  • Bilibili: captions, higher resolutions (Premium)
+				  • YouTube: age-restricted videos, members-only content
 
 				'Auto' tries Chrome, Firefox, then Edge in sequence.
-				'Opera GX' is listed separately from Opera — pick the right one for your install.
-				'None' disables cookie-based auth entirely (Bilibili captions will be unavailable).
+				'Opera GX' is listed separately from Opera — pick the right one.
+				'None' disables automatic browser reading entirely.
 
-				Note: Chromium-based browsers (Chrome, Edge, Opera, Brave) may fail to share
-				cookies while the browser is open due to database locking. Firefox does not
-				have this limitation and is the most reliable choice if captions are important.
-				'''
-		}
+				Tip: For the most reliable experience, run  /tvsetup cookies  in chat
+				to save your cookies to the TerraVision cookies folder. Saved cookies
+				work even while your browser is open and apply to all supported sites.
 
-		CookiesFilePath: {
-			Label: Cookies File Path (Advanced)
-			Tooltip:
-				'''
-				Optional: path to a Netscape-format cookies.txt file exported from your browser.
-				If set, this takes priority over the 'Browser for Cookies' setting above.
-				Leave blank to use the browser setting instead.
+				Note: Chromium-based browsers (Chrome, Edge, Opera, Brave) may fail
+				while the browser is open due to database locking. Firefox does not
+				have this limitation.
 
-				Example: C:\Users\you\Desktop\cookies.txt
-
-				You can export a cookies.txt from Chrome or Firefox using the
-				'Get cookies.txt LOCALLY' browser extension.
+				If you'd prefer not to close your browser, you can utilize a browser
+				extension to export your cookies manually from the site. 
+				In your files go to:
+				'...Documents\My Games\Terraria\tModLoader\TerraVision\cookies'
+				and then add your cookies as a .txt file with the format <site name>.txt
+				  • Examples: bilibili.com.txt, youtube.com.txt
 				'''
 		}
 	}

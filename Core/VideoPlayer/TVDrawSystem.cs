@@ -1,4 +1,5 @@
-﻿using TerraVision.Content.Tiles.TVs;
+﻿using AngleSharp.Dom;
+using Daybreak.Common.Rendering;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
@@ -7,7 +8,7 @@ using System.Collections.Generic;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ModLoader;
-using Daybreak.Common.Rendering;
+using TerraVision.Content.Tiles.TVs;
 
 namespace TerraVision.Core.VideoPlayer;
 
@@ -63,6 +64,16 @@ public class TVDrawSystem : ModSystem
         if (behindTiles || _tvCache.Count == 0)
         {
             orig(self, behindTiles);
+
+            if(!behindTiles)
+            {
+                Main.spriteBatch.End(out var scope);
+
+                TennaSystem.DrawTennas();
+
+                Main.spriteBatch.Begin(scope);
+            }
+
             return;
         }
 
@@ -80,6 +91,8 @@ public class TVDrawSystem : ModSystem
             }
 
             sb.End(out var scope);
+
+            TennaSystem.DrawTennas();
 
             bool noShaderBatchOpen = false;
 
@@ -155,6 +168,11 @@ public class TVDrawSystem : ModSystem
             for (int i = 0; i < _tvData.Count; i++)
             {
                 TVDrawEntry entry = _tvData[i];
+
+                int tileType = Main.tile[entry.Entity.Position.X, entry.Entity.Position.Y].TileType;
+                if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile && !baseTVTile.UsesStatic())
+                    continue;
+
                 if (entry.NeedsStatic) { hasStatic = true; break; }
             }
 
@@ -166,6 +184,12 @@ public class TVDrawSystem : ModSystem
                 {
                     TVDrawEntry entry = _tvData[i];
                     if (!entry.NeedsStatic)
+                        continue;
+
+                    var player = entry.Entity.GetVideoPlayer();
+
+                    int tileType = Main.tile[entry.Entity.Position.X, entry.Entity.Position.Y].TileType;
+                    if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile && !baseTVTile.UsesStatic())
                         continue;
 
                     try
@@ -182,6 +206,18 @@ public class TVDrawSystem : ModSystem
             }
 
             sb.Begin(scope);
+
+            foreach(var tvEntity in _tvsToRender)
+            {
+                int tileType = Main.tile[tvEntity.Position.X, tvEntity.Position.Y].TileType;
+
+                var player = tvEntity.GetVideoPlayer();
+                bool needsStatic = player == null || (!player.IsPlaying && !player.IsLoading && !player.IsPreparing);
+
+                if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile && (!needsStatic || baseTVTile.UsesStatic()) && ((player != null && !player.IsLoading && !player.IsPreparing) || baseTVTile.UsesLoadingSpinner()))
+                    baseTVTile.PostDrawTVScreen(sb, tvEntity);
+            }
+
             orig(self, behindTiles);
         }
         catch (Exception ex)

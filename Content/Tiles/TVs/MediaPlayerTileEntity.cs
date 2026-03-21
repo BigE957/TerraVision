@@ -79,7 +79,7 @@ public class MediaPlayerEntity : ModTileEntity
         foreach(Point16 p in ConnectedTVs)
         {
             TVTileEntity playerEntity = (TVTileEntity)TileEntity.ByPosition.GetValueOrDefault(p);
-            if (playerEntity.IsOn)
+            if (playerEntity != null && playerEntity.IsOn)
             {
                 anyTVsOn = true;
                 break;

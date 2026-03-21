@@ -58,9 +58,7 @@ public class TVTileEntity : ModTileEntity
         return manager?.GetChannelPlayer(CurrentChannel);
     }
 
-    public string GetDebugInfo() =>
-        $"TV Entity ID: {ID}, Position: {Position}, TilePosition: {TilePosition}, " +
-        $"Channel: {CurrentChannel}, IsOn: {IsOn}, Volume: {Volume}";
+    public string GetDebugInfo() => $"TV Entity ID: {ID}, Position: {Position}, TilePosition: {TilePosition}, Channel: {CurrentChannel}, IsOn: {IsOn}, Volume: {Volume}";
 
     /// <summary>
     /// Handle channel change.
@@ -194,6 +192,10 @@ public class TVTileEntity : ModTileEntity
 
         var player = GetVideoPlayer();
         if (player == null) return;
+
+        int tileType = Main.tile[Position.X, Position.Y].TileType;
+        if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile && !baseTVTile.UsesLoadingSpinner() && (player.IsLoading || player.IsPreparing))
+            return;
 
         player.Draw(spriteBatch, position, size, ExampleVideoUISystem.Background.Value);
     }
