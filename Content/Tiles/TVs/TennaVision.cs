@@ -111,6 +111,8 @@ public class TennaSystem : ModSystem
 
     private static Asset<Texture2D> SignalTexture;
 
+    private static int SignalTimer = 0;
+
     public override void OnModLoad()
     {
         SignalTexture = ModContent.Request<Texture2D>("TerraVision/Content/Tiles/TVs/TennaVisionBolt");
@@ -150,9 +152,7 @@ public class TennaSystem : ModSystem
 
                 if (tvEntity.IsOn && tvEntity.GetVideoPlayer() != null && (tvEntity.GetVideoPlayer().IsLoading || tvEntity.GetVideoPlayer().IsPreparing))
                 {
-                    int wrappedTime = ((int)(Main.GlobalTimeWrappedHourly * 60)) % 120;
-                    //Main.NewText(wrappedTime);
-                    if (wrappedTime == 0)
+                    if (SignalTimer == 0)
                     {
                         Vector2 topLeft = p.ToWorldCoordinates(0, 0);
                         SoundEngine.PlaySound(new("TerraVision/Assets/Sounds/snd_sonar"), topLeft + (dimensions.ToWorldCoordinates() / 2f));
@@ -169,6 +169,10 @@ public class TennaSystem : ModSystem
 
         foreach (Point p in tennasToKill)
             Tennas.Remove(p);
+
+        SignalTimer++;
+        if (SignalTimer >= 120)
+            SignalTimer = 0;
 
     }
 
