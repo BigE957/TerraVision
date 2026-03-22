@@ -71,6 +71,9 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     private int _backupUrlIndex = 0;
     private VideoStreamResult _currentStreamResult = null;
 
+    // Start-time seek — populated by Play() when the input URL contains a timestamp, consumed and cleared in OnPlaying() once PlaybackReady fires
+    private long? _pendingStartTimeMs = null;
+
     // Danmaku
     private readonly DanmakuRenderer _danmakuRenderer = new();
     private List<DanmakuComment> _danmakuComments = null;
@@ -172,6 +175,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         if (string.IsNullOrWhiteSpace(input))
             return;
 
+        // Parse any embedded timestamp or playlist index before the URL enters the queue
+        var meta = VideoUrlHelper.ParseUrlMetadata(input);
+        input = meta.CleanUrl;
+        _pendingStartTimeMs = meta.StartTimeMs;
+
         try
         {
             lock (_stateLock)
@@ -244,6 +252,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         }
         _isPreparing = true;
         _currentMedia = new Media(TerraVision.LibVLCInstance, resolvedPath, FromType.FromPath);
+        if (_pendingStartTimeMs.HasValue)
+        {
+            _currentMedia.AddOption($":start-time={_pendingStartTimeMs.Value / 1000.0:F3}");
+            _pendingStartTimeMs = null;
+        }
         _currentVideoPath = filePath;
         _mediaPlayer.Play(_currentMedia);
     }
@@ -393,6 +406,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                             : [];
                         _backupUrlIndex = 0;
                         _currentMedia = BuildMedia(streamResult);
+                        if (_pendingStartTimeMs.HasValue)
+                        {
+                            _currentMedia.AddOption($":start-time={_pendingStartTimeMs.Value / 1000.0:F3}");
+                            _pendingStartTimeMs = null;
+                        }
                         _currentVideoPath = url;
                         _mediaPlayer.Play(_currentMedia);
                     }

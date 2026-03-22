@@ -9,6 +9,7 @@ using Terraria;
 using Terraria.ModLoader;
 using TerraVision.Core.VideoPlayer.VideoUrlExtractors;
 using YoutubeExplode.Common;
+using YoutubeExplode.Search;
 
 namespace TerraVision.Core.VideoPlayer;
 
@@ -61,6 +62,9 @@ public static class VideoUrlHelper
                (url.Contains("list=") || url.Contains("/playlist?"));
     }
 
+    /// <summary>
+    /// Returns true for all YouTube URL forms: standard watch, shorts, music, and youtu.be short links.
+    /// </summary>
     public static bool IsYouTubeUrl(string url) => url.Contains("youtube.com") || url.Contains("youtu.be");
 
     public static bool IsSupportedVideoUrl(string url)
@@ -68,16 +72,16 @@ public static class VideoUrlHelper
         if (string.IsNullOrWhiteSpace(url))
             return false;
 
-        string[] supportedDomains = new[]
-        {
+        string[] supportedDomains =
+        [
             "youtube.com", "youtu.be",
-            "twitch.tv",
+            "twitch.tv", "clips.twitch.tv",
             "vimeo.com",
             "twitter.com", "x.com",
             "tiktok.com",
             "reddit.com",
             "bilibili.com",
-        };
+        ];
 
         string lowerUrl = url.ToLower();
         return supportedDomains.Any(domain => lowerUrl.Contains(domain));
@@ -102,6 +106,67 @@ public static class VideoUrlHelper
             TerraVision.instance.Logger.Error($"Failed to extract playlist ID: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Returns the zero-based video index from a YouTube URL's &amp;index= parameter, or null if absent.
+    /// YouTube's index parameter is 1-based and is converted here for direct use with playlist arrays.
+    /// </summary>
+    public static int? ExtractPlaylistIndex(string url)
+    {
+        string value = GetQueryParam(url, "index");
+        if (value != null && int.TryParse(value, out int idx) && idx > 0)
+            return idx - 1;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses a URL and extracts any embedded playback hints without modifying the caller's input.
+    /// Returns a <see cref="UrlMetadata"/> containing a clean URL (timestamp params stripped so
+    /// yt-dlp isn't confused by them) plus any start time and playlist index that were present.
+    ///
+    /// Supported timestamp formats across platforms:
+    ///   YouTube / Bilibili  — ?t=90, ?t=90s, ?t=1h30m45s, ?start=90 (embed URLs)
+    ///   Twitch VODs         — ?t=1h30m45s
+    /// </summary>
+    public static UrlMetadata ParseUrlMetadata(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return new UrlMetadata { CleanUrl = url };
+
+        bool isYouTube = IsYouTubeUrl(url);
+        bool isTwitch = url.Contains("twitch.tv");
+        bool isBilibili = url.Contains("bilibili.com");
+
+        long? startTimeMs = null;
+        int? playlistIndex = null;
+
+        if (isYouTube || isTwitch || isBilibili)
+        {
+            // ?start= is used by YouTube embed URLs; ?t= covers everything else
+            string timeValue = GetQueryParam(url, "t") ?? (isYouTube ? GetQueryParam(url, "start") : null);
+
+            if (timeValue != null)
+            {
+                long parsed = ParseStartTimeMs(timeValue);
+                if (parsed > 0)
+                    startTimeMs = parsed;
+            }
+        }
+
+        if (isYouTube)
+            playlistIndex = ExtractPlaylistIndex(url);
+
+        // Strip timestamp params so extractors receive a clean URL; seek is handled after PlaybackReady
+        string cleanUrl = startTimeMs.HasValue ? StripQueryParams(url, "t", "start") : url;
+
+        return new UrlMetadata
+        {
+            CleanUrl = cleanUrl,
+            StartTimeMs = startTimeMs,
+            PlaylistIndex = playlistIndex
+        };
     }
 
     public static void ClearCache()
@@ -174,6 +239,138 @@ public static class VideoUrlHelper
         return long.TryParse(value, out long ts) ? ts : 0;
     }
 
+    /// <summary>
+    /// Returns the value of a single query parameter from a URL, or null if not present.
+    /// </summary>
+    private static string GetQueryParam(string url, string paramName)
+    {
+        if (string.IsNullOrEmpty(url))
+            return null;
+
+        int queryStart = url.IndexOf('?');
+        if (queryStart < 0)
+            return null;
+
+        string query = url[(queryStart + 1)..];
+
+        // Ignore fragment
+        int fragmentStart = query.IndexOf('#');
+        if (fragmentStart >= 0)
+            query = query[..fragmentStart];
+
+        foreach (string param in query.Split('&'))
+        {
+            if (string.IsNullOrEmpty(param))
+                continue;
+
+            int eq = param.IndexOf('=');
+            if (eq < 0)
+                continue;
+
+            if (string.Equals(param[..eq], paramName, StringComparison.OrdinalIgnoreCase))
+                return param[(eq + 1)..];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns a copy of the URL with the specified query parameters removed.
+    /// Preserves all other parameters and any fragment identifier.
+    /// </summary>
+    private static string StripQueryParams(string url, params string[] paramsToRemove)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        try
+        {
+            int queryStart = url.IndexOf('?');
+            if (queryStart < 0)
+                return url;
+
+            string baseUrl = url[..queryStart];
+            string query = url[(queryStart + 1)..];
+
+            string fragment = "";
+            int fragmentStart = query.IndexOf('#');
+            if (fragmentStart >= 0)
+            {
+                fragment = query[fragmentStart..];
+                query = query[..fragmentStart];
+            }
+
+            var kept = new List<string>();
+            foreach (string param in query.Split('&'))
+            {
+                if (string.IsNullOrEmpty(param))
+                    continue;
+
+                int eq = param.IndexOf('=');
+                string key = eq >= 0 ? param[..eq] : param;
+
+                if (!paramsToRemove.Contains(key, StringComparer.OrdinalIgnoreCase))
+                    kept.Add(param);
+            }
+
+            string newQuery = kept.Count > 0 ? "?" + string.Join("&", kept) : "";
+            return baseUrl + newQuery + fragment;
+        }
+        catch
+        {
+            return url;
+        }
+    }
+
+    /// <summary>
+    /// Parses a timestamp string into milliseconds.
+    ///
+    /// Handles all common URL timestamp formats:
+    ///   90       — plain seconds
+    ///   90s      — seconds with suffix
+    ///   30m45s   — minutes and seconds
+    ///   1h30m45s — hours, minutes, and seconds (any combination)
+    /// </summary>
+    private static long ParseStartTimeMs(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return 0;
+
+        // Plain seconds, possibly with a trailing 's'
+        string stripped = value.TrimEnd('s');
+        if (long.TryParse(stripped, out long plainSeconds))
+            return plainSeconds * 1000;
+
+        // hms format: walk through digit runs followed by a unit character
+        long totalSeconds = 0;
+        int i = 0;
+
+        while (i < value.Length)
+        {
+            int numStart = i;
+            while (i < value.Length && char.IsDigit(value[i]))
+                i++;
+
+            if (i == numStart || i >= value.Length)
+                break;
+
+            if (!long.TryParse(value[numStart..i], out long num))
+                break;
+
+            totalSeconds += value[i] switch
+            {
+                'h' => num * 3600,
+                'm' => num * 60,
+                's' => num,
+                _ => 0
+            };
+
+            i++;
+        }
+
+        return totalSeconds * 1000;
+    }
+
     public static async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
@@ -182,7 +379,6 @@ public static class VideoUrlHelper
             return null;
         }
 
-        // FIX #17: use UtcNow for cache timestamp comparisons
         if (_urlCache.TryGetValue(url, out var cached))
         {
             if (cached.IsLivestream)
@@ -212,8 +408,6 @@ public static class VideoUrlHelper
                 return null;
             }
 
-            // FIX #7: double-check cache after acquiring the lock — a concurrent request
-            // for the same URL may have populated it while we were waiting.
             if (_urlCache.TryGetValue(url, out var cachedAfterLock))
             {
                 if (!cachedAfterLock.IsLivestream && IsCachedResultStillValid(cachedAfterLock.Result, cachedAfterLock.Timestamp))
@@ -228,17 +422,12 @@ public static class VideoUrlHelper
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linkedCts.CancelAfter(isDownload ? DownloadTimeout : RequestTimeout);
 
-            // FIX #5: removed the separate IsLivestreamAsync call that was here.
-            // HybridVideoExtractor now sets result.IsLivestream = true internally when it
-            // detects and routes a livestream, so we get that information for free from
-            // the single GetDirectUrlAsync call below — no redundant yt-dlp metadata fetch.
             VideoStreamResult streamResult = await _extractor.GetDirectUrlAsync(url, linkedCts.Token);
 
             if (streamResult != null)
             {
                 if (!streamResult.IsLivestream)
                 {
-                    // FIX #17: store UtcNow so comparisons are timezone-safe
                     _urlCache[url] = (streamResult, DateTime.UtcNow, false);
                     TerraVision.instance.Logger.Debug("Cached URL for regular video");
                 }
@@ -306,13 +495,13 @@ public static class VideoUrlHelper
         if (!IsReady)
         {
             TerraVision.instance.Logger.Error("Video extraction system not ready");
-            return new List<string>();
+            return [];
         }
 
         if (string.IsNullOrWhiteSpace(playlistId))
         {
             TerraVision.instance.Logger.Error("Empty playlist ID");
-            return new List<string>();
+            return [];
         }
 
         try
@@ -327,7 +516,7 @@ public static class VideoUrlHelper
         catch (Exception ex)
         {
             TerraVision.instance.Logger.Error($"Playlist fetch failed: {ex.Message}");
-            return new List<string>();
+            return [];
         }
     }
 
@@ -494,4 +683,30 @@ public class VideoStreamResult
     /// so callers can make caching decisions without a separate metadata fetch.
     /// </summary>
     public bool IsLivestream { get; set; }
+}
+
+/// <summary>
+/// Playback hints extracted from a user-supplied URL by <see cref="VideoUrlHelper.ParseUrlMetadata"/>.
+/// </summary>
+public class UrlMetadata
+{
+    /// <summary>
+    /// The original URL with timestamp and other playback-hint parameters stripped.
+    /// Safe to pass directly to yt-dlp and the extractor pipeline.
+    /// </summary>
+    public string CleanUrl { get; set; }
+
+    /// <summary>
+    /// Requested start position in milliseconds, if a timestamp parameter was present in the URL.
+    /// Null if no timestamp was found.
+    /// Seek to this position after <c>PlaybackReady</c> fires — LibVLC cannot seek before media loads.
+    /// </summary>
+    public long? StartTimeMs { get; set; }
+
+    /// <summary>
+    /// Zero-based playlist video index, if the URL included an &amp;index= parameter.
+    /// YouTube's index parameter is 1-based and is converted here for direct use with playlist arrays.
+    /// Null if no index was present.
+    /// </summary>
+    public int? PlaylistIndex { get; set; }
 }
