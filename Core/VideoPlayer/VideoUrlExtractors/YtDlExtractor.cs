@@ -49,6 +49,13 @@ public class YtDlExtractor : IVideoUrlExtractor
     private static string GetBinaryName() => Environment.OSVersion.Platform == PlatformID.Win32NT ? "yt-dlp.exe" : "yt-dlp";
 
     private static string GetFfmpegBinaryName() => Environment.OSVersion.Platform == PlatformID.Win32NT ? "ffmpeg.exe" : "ffmpeg";
+    private static string BuildFormatSelector(int? maxHeight)
+    {
+        if (maxHeight == null)
+            return "bestvideo+bestaudio/best";
+
+        return $"bestvideo[height<={maxHeight}]+bestaudio/best[height<={maxHeight}]";
+    }
 
     public async Task<bool> InitializeAsync()
     {
@@ -519,6 +526,10 @@ public class YtDlExtractor : IVideoUrlExtractor
                 TerraVision.instance.Logger.Debug($"[YtDlp] Using saved cookies for {CookieManager.ExtractDomain(url)}");
             }
 
+            int? maxHeight = ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
+            if (maxHeight.HasValue)
+                options.Format = BuildFormatSelector(maxHeight.Value);
+
             var result = await _ytdl.RunVideoDataFetch(url, ct: cancellationToken, overrideOptions: options);
 
             if (!result.Success || result.Data == null)
@@ -552,7 +563,8 @@ public class YtDlExtractor : IVideoUrlExtractor
                 var combined = formats
                     .Where(f => !string.IsNullOrWhiteSpace(f.Url)
                              && f.VideoCodec != "none" && !string.IsNullOrWhiteSpace(f.VideoCodec)
-                             && f.AudioCodec != "none" && !string.IsNullOrWhiteSpace(f.AudioCodec))
+                             && f.AudioCodec != "none" && !string.IsNullOrWhiteSpace(f.AudioCodec)
+                             && (maxHeight == null || (f.Height ?? 0) <= maxHeight))
                     .OrderByDescending(f => f.Height ?? 0)
                     .FirstOrDefault();
 
@@ -566,7 +578,8 @@ public class YtDlExtractor : IVideoUrlExtractor
                 // Separate video and audio tracks
                 var bestVideo = formats
                     .Where(f => !string.IsNullOrWhiteSpace(f.Url)
-                             && f.VideoCodec != "none" && !string.IsNullOrWhiteSpace(f.VideoCodec))
+                             && f.VideoCodec != "none" && !string.IsNullOrWhiteSpace(f.VideoCodec)
+                             && (maxHeight == null || (f.Height ?? 0) <= maxHeight))
                     .OrderByDescending(f => f.Height ?? 0)
                     .FirstOrDefault();
 
@@ -800,7 +813,8 @@ public class YtDlExtractor : IVideoUrlExtractor
             var existingFiles = Directory.GetFiles(tempDir).ToDictionary(f => f, f => File.GetLastWriteTimeUtc(f));
 
             string cookieArg = CookieManager.GetFolderCookiesArg(url) ?? "";
-            string args = $"{cookieArg} --no-playlist -f \"bestvideo+bestaudio/best\" " +
+            int? maxHeight = ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
+            string args = $"{cookieArg} --no-playlist -f \"{BuildFormatSelector(maxHeight)}\" " +
                           $"--merge-output-format mp4 " +
                           $"-o \"{outputTemplate}\" " +
                           $"--print after_move:filepath " +
@@ -828,8 +842,7 @@ public class YtDlExtractor : IVideoUrlExtractor
                 TerraVision.instance.Logger.Debug("--print filepath parse failed, scanning output dir for new files...");
                 filePath = Directory.GetFiles(tempDir, "*.mp4")
                     .Concat(Directory.GetFiles(tempDir, "*.mkv"))
-                    .Where(f => !existingFiles.ContainsKey(f) ||
-                                File.GetLastWriteTimeUtc(f) > existingFiles[f])
+                    .Where(f => !existingFiles.ContainsKey(f) || File.GetLastWriteTimeUtc(f) > existingFiles[f])
                     .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
                     .FirstOrDefault();
             }

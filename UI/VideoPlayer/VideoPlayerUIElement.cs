@@ -66,6 +66,7 @@ public class VideoPlayerUIElement : UIElement, IDisposable
     public void Seek(float position) => _playerCore.Seek(position);
     public void SetVolume(int volume) => _playerCore.SetVolume(volume);
     public void SetMute(bool muted) => _playerCore.SetMute(muted);
+    public void SetCaptionsEnabled(bool enabled) => _playerCore.SetCaptionsEnabled(enabled);
 
     #endregion
 
@@ -76,6 +77,7 @@ public class VideoPlayerUIElement : UIElement, IDisposable
     public bool IsInitialized => _playerCore.IsInitialized;
     public bool IsLoading => _playerCore.IsLoading;
     public string CurrentVideoPath => _playerCore.CurrentVideoPath;
+    public bool CaptionsEnabled => _playerCore.CaptionsEnabled;
     public float GetPosition() => _playerCore.GetPosition();
     public long GetDuration() => _playerCore.GetDuration();
     public int GetVolume() => _playerCore.GetVolume();

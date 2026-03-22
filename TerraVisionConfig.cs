@@ -30,15 +30,46 @@ public enum BrowserCookieSource
     None
 }
 
+/// <summary>
+/// Maximum video resolution to request from extractors.
+/// Auto selects the best available quality.
+/// </summary>
+public enum PreferredVideoQuality
+{
+    Auto,
+    Q480p,
+    Q720p,
+    Q1080p,
+    Q1440p,
+    Q2160p
+}
+
 public class TerraVisionConfig : ModConfig
 {
     public override ConfigScope Mode => ConfigScope.ClientSide;
 
-    // -------------------------------------------------------------------------
-    // Cookie settings
-    // -------------------------------------------------------------------------
-
     [Header("Cookies")]
     [DefaultValue(BrowserCookieSource.Auto)]
     public BrowserCookieSource BrowserForCookies { get; set; } = BrowserCookieSource.Auto;
+
+    [Header("Playback")]
+    [DefaultValue(PreferredVideoQuality.Auto)]
+    public PreferredVideoQuality VideoQuality { get; set; } = PreferredVideoQuality.Auto;
+
+    [DefaultValue(true)]
+    public bool EnableCaptions { get; set; } = true;
+
+    /// <summary>
+    /// Returns the configured maximum video height in pixels, or null for uncapped (Auto).
+    /// Used by extractors to filter or request streams at or below this resolution.
+    /// </summary>
+    public int? MaxVideoHeight() => VideoQuality switch
+    {
+        PreferredVideoQuality.Q480p => 480,
+        PreferredVideoQuality.Q720p => 720,
+        PreferredVideoQuality.Q1080p => 1080,
+        PreferredVideoQuality.Q1440p => 1440,
+        PreferredVideoQuality.Q2160p => 2160,
+        _ => null
+    };
 }

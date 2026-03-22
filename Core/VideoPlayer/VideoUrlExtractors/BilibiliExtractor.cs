@@ -193,13 +193,16 @@ public class BilibiliExtractor
 
     private async Task<VideoStreamResult> FetchPlayUrlWithFnvalAsync(string bvid, long cid, string mixinKey, string cookieHeader, int fnval, CancellationToken token)
     {
+        int? maxHeight = Terraria.ModLoader.ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
+
         var rawParams = new SortedDictionary<string, string>
         {
             ["bvid"] = bvid,
             ["cid"] = cid.ToString(),
             ["fnval"] = fnval.ToString(),
             ["fnver"] = "0",
-            ["fourk"] = "1",
+            ["fourk"] = maxHeight == null || maxHeight > 1080 ? "1" : "0",
+            ["qn"] = HeightToQn(maxHeight).ToString(),
             ["wts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()
         };
 
@@ -244,7 +247,7 @@ public class BilibiliExtractor
         // DASH path: separate video + audio streams (only used as last resort)
         if (data.TryGetProperty("dash", out var dash))
         {
-            string videoUrl = PickBestStream(dash.GetProperty("video"));
+            string videoUrl = PickBestStream(dash.GetProperty("video"), maxHeight);
             if (string.IsNullOrEmpty(videoUrl))
                 return null;
 
@@ -259,21 +262,32 @@ public class BilibiliExtractor
         return null;
     }
 
+    private static int HeightToQn(int? maxHeight) => maxHeight switch
+    {
+        <= 480 => 32,   // 480p
+        <= 720 => 64,   // 720p
+        <= 1080 => 80,   // 1080p
+        <= 1440 => 112,  // 1080p+ (highest non-4K tier)
+        _ => 120   // 4K
+    };
+
     /// <summary>
     /// Picks the highest-quality stream from a DASH video or audio array.
     /// Streams are sorted by bandwidth descending; we take the first available URL.
     /// </summary>
-    private static string PickBestStream(JsonElement streams)
+    private static string PickBestStream(JsonElement streams, int? maxHeight = null)
     {
         string bestUrl = null;
         int bestBandwidth = -1;
 
         foreach (var stream in streams.EnumerateArray())
         {
+            if (maxHeight != null && stream.TryGetProperty("height", out var h) && h.GetInt32() > maxHeight)
+                continue;
+
             int bandwidth = stream.TryGetProperty("bandwidth", out var bw) ? bw.GetInt32() : 0;
             if (bandwidth > bestBandwidth)
             {
-                // Prefer baseUrl over backupUrl
                 string url = null;
                 if (stream.TryGetProperty("baseUrl", out var bu))
                     url = bu.GetString();

@@ -32,6 +32,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
     private UITextPanel<string> _pauseButton;
     private UITextPanel<string> _stopButton;
     private UITextPanel<string> _closeButton;
+    private UITextPanel<string> _captionsButton;
 
     // Timeline elements
     private UIRectangle _timelineBar;
@@ -62,6 +63,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
             if (_playButton != null && _playButton.IsMouseHovering) return false;
             if (_pauseButton != null && _pauseButton.IsMouseHovering) return false;
             if (_stopButton != null && _stopButton.IsMouseHovering) return false;
+            if (_captionsButton != null && _captionsButton.IsMouseHovering) return false;
             if (_closeButton != null && _closeButton.IsMouseHovering) return false;
             return true;
         };
@@ -174,7 +176,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         float buttonSpacing = 10f;
         float buttonWidth = 100f;
         float panelWidth = 760;
-        float startX = (panelWidth - (buttonWidth * 4 + buttonSpacing * 3)) / 2;
+        float startX = (panelWidth - (buttonWidth * 5 + buttonSpacing * 4)) / 2;
 
         _playButton = new UITextPanel<string>("Play");
         _playButton.Width.Set(buttonWidth, 0f);
@@ -200,10 +202,18 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         _stopButton.OnLeftClick += OnStopClicked;
         _controlPanel.Append(_stopButton);
 
+        _captionsButton = new UITextPanel<string>("CC: On");
+        _captionsButton.Width.Set(buttonWidth, 0f);
+        _captionsButton.Height.Set(40, 0f);
+        _captionsButton.Left.Set(startX + (buttonWidth + buttonSpacing) * 3, 0f);
+        _captionsButton.VAlign = 0.5f;
+        _captionsButton.OnLeftClick += OnCaptionsClicked;
+        _controlPanel.Append(_captionsButton);
+
         _closeButton = new UITextPanel<string>("Close");
         _closeButton.Width.Set(buttonWidth, 0f);
         _closeButton.Height.Set(40, 0f);
-        _closeButton.Left.Set(startX + (buttonWidth + buttonSpacing) * 3, 0f);
+        _closeButton.Left.Set(startX + (buttonWidth + buttonSpacing) * 4, 0f);
         _closeButton.VAlign = 0.5f;
         _closeButton.OnLeftClick += OnCloseClicked;
         _closeButton.BackgroundColor = new Color(100, 50, 50);
@@ -244,6 +254,13 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
     private void OnStopClicked(UIMouseEvent evt, UIElement listeningElement)
     {
         _videoPlayer.player.Stop();
+    }
+
+    private void OnCaptionsClicked(UIMouseEvent evt, UIElement listeningElement)
+    {
+        bool newState = !_videoPlayer.player.CaptionsEnabled;
+        _videoPlayer.player.SetCaptionsEnabled(newState);
+        _captionsButton.SetText(newState ? "CC: On" : "CC: Off");
     }
 
     private void OnCloseClicked(UIMouseEvent evt, UIElement listeningElement)

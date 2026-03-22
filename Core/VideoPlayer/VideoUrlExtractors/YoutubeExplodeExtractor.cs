@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Terraria.ModLoader;
 using YoutubeExplode;
 
 namespace TerraVision.Core.VideoPlayer.VideoUrlExtractors;
@@ -51,10 +52,12 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
         try
         {
             var streamManifest = await _youtube.Videos.Streams.GetManifestAsync(url, cancellationToken);
+            int? maxHeight = ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
 
             // Muxed streams are simplest — video and audio in one URL
             var muxedStream = streamManifest
                 .GetMuxedStreams()
+                .Where(s => maxHeight == null || s.VideoQuality.MaxHeight <= maxHeight)
                 .OrderByDescending(s => s.VideoQuality.MaxHeight)
                 .FirstOrDefault();
 
@@ -67,6 +70,7 @@ public class YoutubeExplodeExtractor : IVideoUrlExtractor
             // No muxed stream — try separate video + audio (DASH)
             var videoStream = streamManifest
                 .GetVideoOnlyStreams()
+                .Where(s => maxHeight == null || s.VideoQuality.MaxHeight <= maxHeight)
                 .OrderByDescending(s => s.VideoQuality.MaxHeight)
                 .FirstOrDefault();
 

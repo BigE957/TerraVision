@@ -72,6 +72,7 @@ Configs: {
 		Headers: {
 			Captions: Captions
 			Cookies: Cookies
+			Playback: Playback
 		}
 
 		BrowserForCookies: {
@@ -104,6 +105,20 @@ Configs: {
 				and then add your cookies as a .txt file with the format <site name>.txt
 				  • Examples: bilibili.com.txt, youtube.com.txt
 				'''
+		}
+
+		VideoQuality: {
+			Label: Video Quality
+			Tooltip:
+				'''
+				Sets a preferred/maximum allowed video quality to be used for video requests.
+				Auto will simply get the highest quality available.
+				'''
+		}
+
+		EnableCaptions: {
+			Label: Enable Captions
+			Tooltip: "Globally disables captions, stopping them from even being loaded."
 		}
 	}
 
@@ -152,6 +167,40 @@ Configs: {
 
 		OperaGX: {
 			Label: Opera GX
+			Tooltip: ""
+		}
+	}
+
+	PreferredVideoQuality: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Auto
+			Tooltip: ""
+		}
+
+		Q480p: {
+			Label: 480p
+			Tooltip: ""
+		}
+
+		Q720p: {
+			Label: 720p
+			Tooltip: ""
+		}
+
+		Q1080p: {
+			Label: 1080p
+			Tooltip: ""
+		}
+
+		Q1440p: {
+			Label: 1440p
+			Tooltip: ""
+		}
+
+		Q2160p: {
+			Label: 2160p
 			Tooltip: ""
 		}
 	}

@@ -84,9 +84,11 @@ public static partial class CaptionFetcher
     ///   Other    — Generic yt-dlp attempt, VTT preferred then SRT
     /// Returns an empty list if no captions are available.
     /// </summary>
-    public static async Task<List<CaptionBlock>> FetchAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    public static async Task<List<CaptionBlock>> FetchAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
+        if (!(ModContent.GetInstance<TerraVisionConfig>()?.EnableCaptions ?? true))
+            return [];
+
         if (url.Contains("youtube.com") || url.Contains("youtu.be"))
             return await FetchYouTubeAsync(url, ytdlpPath, token);
 

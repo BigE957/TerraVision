@@ -43,6 +43,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     private bool _isLoading;
     private float _loadingRotation;
     private bool _isPreparing;
+    private bool _captionsEnabled = true;
 
     // Video queue for playlists
     private Queue<string> _videoQueue = [];
@@ -107,6 +108,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
 
     public bool IsPlaying => _isPlaying;
     public bool IsPaused => _isPaused;
+    public bool CaptionsEnabled => _captionsEnabled;
     public bool IsInitialized => _isInitialized;
     public bool IsLoading => _isLoading;
     public bool IsPreparing => _isPreparing;
@@ -957,6 +959,11 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         }
     }
 
+    public void SetCaptionsEnabled(bool enabled)
+    {
+        _captionsEnabled = enabled;
+    }
+
     public float GetPosition() => _mediaPlayer?.Position ?? 0f;
     public long GetDuration() => _mediaPlayer?.Length ?? 0;
     public int GetVolume() => _mediaPlayer?.Volume ?? 0;
@@ -1225,7 +1232,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         _danmakuRenderer.Draw(spriteBatch, videoRect, _danmakuTimer, opacity);
 
         // Caption overlay
-        _captionRenderer.Draw(spriteBatch, videoRect, GetTimeSeconds(), pixel, opacity);
+        if (_captionsEnabled)
+            _captionRenderer.Draw(spriteBatch, videoRect, GetTimeSeconds(), pixel, opacity);
     }
 
     private void DrawLoadingSpinner(SpriteBatch spriteBatch, Texture2D pixel, Vector2 center, float radius, float dotSize)

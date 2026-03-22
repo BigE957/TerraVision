@@ -29,12 +29,14 @@ public class VideoChannelManager : ModSystem
         public string Query { get; set; }
         public int ResultIndex { get; set; } = -1;
         public int MaxResults { get; set; } = 10;
+        public bool ShowCaptions { get; set; } = true;
 
-        public ContentEntry(string query, int resultIndex = -1, int maxResults = 10)
+        public ContentEntry(string query, int resultIndex = -1, int maxResults = 10, bool showCaptions = true)
         {
             Query = query;
             ResultIndex = resultIndex;
             MaxResults = maxResults;
+            ShowCaptions = showCaptions;
         }
     }
 
@@ -84,6 +86,7 @@ public class VideoChannelManager : ModSystem
         public Func<bool> TriggerCondition { get; set; }
         public RepeatMode RepeatBehavior { get; set; }
         public int Priority { get; set; } // Higher priority plays first if multiple conditions are true
+        public bool ShowCaptions { get; set; } = true;
 
         // Tracking data
         internal bool HasPlayedThisSession { get; set; } = false;
@@ -91,7 +94,7 @@ public class VideoChannelManager : ModSystem
         internal DateTime LastPlayedTime { get; set; } = DateTime.MinValue;
         internal HashSet<string> PlayersWhoHaveSeen { get; set; } = [];
 
-        public SpecialEventVideo(string videoUrl, Func<bool> triggerCondition, RepeatMode repeatBehavior = RepeatMode.OncePerSession, int priority = 0)
+        public SpecialEventVideo(string videoUrl, Func<bool> triggerCondition, RepeatMode repeatBehavior = RepeatMode.OncePerSession, int priority = 0, bool ShowCaptions = true)
         {
             VideoUrl = videoUrl;
             TriggerCondition = triggerCondition;
@@ -299,9 +302,9 @@ public class VideoChannelManager : ModSystem
     /// <summary>
     /// Add a special event video. Can be called by other mods via mod call.
     /// </summary>
-    public static void AddSpecialEventVideo(string videoUrl, Func<bool> triggerCondition, RepeatMode repeatBehavior = RepeatMode.OncePerSession, int priority = 0)
+    public static void AddSpecialEventVideo(string videoUrl, Func<bool> triggerCondition, RepeatMode repeatBehavior = RepeatMode.OncePerSession, int priority = 0, bool showCaptions = true)
     {
-        var specialEvent = new SpecialEventVideo(videoUrl, triggerCondition, repeatBehavior, priority);
+        var specialEvent = new SpecialEventVideo(videoUrl, triggerCondition, repeatBehavior, priority, showCaptions);
         SpecialEventVideos.Add(specialEvent);
         ModContent.GetInstance<TerraVision>().Logger.Info($"Added special event video with priority {priority} and repeat mode {repeatBehavior}");
     }
@@ -481,6 +484,7 @@ public class VideoChannelManager : ModSystem
         _overrideChannelPlayer.PlaybackError += errorHandler;
 
         TerraVision.instance.Logger.Info($"[PlaySpecialEvent] Starting to load video: {specialEvent.VideoUrl}");
+        _overrideChannelPlayer.SetCaptionsEnabled(specialEvent.ShowCaptions);
         _overrideChannelPlayer.Play(specialEvent.VideoUrl, forcePlay: true);
         TerraVision.instance.Logger.Info($"[PlaySpecialEvent] Video loading initiated");
     }
@@ -546,21 +550,13 @@ public class VideoChannelManager : ModSystem
 
         ContentEntry entry;
         if (channelContent.Entries.Count == 1)
-        {
             entry = channelContent.Entries[0];
-        }
         else
         {
-            ContentEntry lastEntry = _lastPlayedEntry.ContainsKey(channelId)
-                ? _lastPlayedEntry[channelId]
-                : null;
+            ContentEntry lastEntry = _lastPlayedEntry.ContainsKey(channelId) ? _lastPlayedEntry[channelId] : null;
 
             if (channelContent.Entries.Count == 2)
-            {
-                entry = channelContent.Entries[0] == lastEntry
-                    ? channelContent.Entries[1]
-                    : channelContent.Entries[0];
-            }
+                entry = channelContent.Entries[0] == lastEntry ? channelContent.Entries[1] : channelContent.Entries[0];
             else
             {
                 do
@@ -582,20 +578,14 @@ public class VideoChannelManager : ModSystem
     {
         string query = entry.Query;
 
-        if (VideoPlayerCore.IsFilePath(query) ||
-            VideoUrlHelper.IsSupportedVideoUrl(query) ||
-            VideoPlayerCore.IsMediaLink(query))
-        {
-            player.Play(query, forcePlay: true);
-        }
-        else if (VideoUrlHelper.IsYouTubePlaylist(query))
-        {
+        player.SetCaptionsEnabled(entry.ShowCaptions);
+
+        if (isPlaylist)
             PlayPlaylist(query, entry, player);
-        }
+        else if (VideoPlayerCore.IsFilePath(query) || VideoUrlHelper.IsSupportedVideoUrl(query) || VideoPlayerCore.IsMediaLink(query))
+            player.Play(query, forcePlay: true);
         else
-        {
             player.PlayWithSearchParams(query, entry.ResultIndex, entry.MaxResults, forcePlay: true);
-        }
     }
 
     /// <summary>
