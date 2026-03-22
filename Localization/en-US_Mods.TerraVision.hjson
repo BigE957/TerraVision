@@ -58,6 +58,11 @@ Items: {
 		DisplayName: Tenna Vision Item
 		Tooltip: ""
 	}
+
+	TVMonolithItem: {
+		DisplayName: T V Monolith Item
+		Tooltip: ""
+	}
 }
 
 Configs: {

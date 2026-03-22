@@ -19,7 +19,7 @@ namespace TerraVision.Content.Tiles.TVs;
 /// </summary>
 public class TVTileEntity : ModTileEntity
 {
-    public static Dictionary<int, (Point TileSize, Rectangle ScreenOffsets)> TileData = [];
+    public static readonly Dictionary<int, (Point TileSize, Rectangle ScreenOffsets)> TileData = [];
 
     public bool IsOn { get; set; } = false;
     public int Volume { get; set; } = 100;
@@ -217,11 +217,7 @@ public class TVTileEntity : ModTileEntity
                 );
             }
 
-            Rectangle sourceRect = new Rectangle(
-                (int)_staticOffset.X, (int)_staticOffset.Y,
-                Math.Min(_staticTexture.Width(), screenArea.Width),
-                Math.Min(_staticTexture.Height(), screenArea.Height)
-            );
+            Rectangle sourceRect = new((int)_staticOffset.X, (int)_staticOffset.Y, Math.Min(_staticTexture.Width(), screenArea.Width), Math.Min(_staticTexture.Height(), screenArea.Height));
 
             spriteBatch.Draw(_staticTexture.Value, screenArea, sourceRect, Color.White);
         }

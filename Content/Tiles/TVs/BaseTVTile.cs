@@ -21,6 +21,7 @@ public abstract class BaseTVTile : ModTile
 
     public virtual bool UsesStatic() => true;
     public virtual bool UsesLoadingSpinner() => true;
+    public virtual bool DrawsScreenNormally() => true;
 
     /// <summary>
     /// Get the shader effect for this TV type.
@@ -77,7 +78,7 @@ public abstract class BaseTVTile : ModTile
         ModContent.GetInstance<TVTileEntity>().Kill(origin.X, origin.Y);
     }
 
-    protected static Point16 GetTileOrigin(int i, int j, int width, int height, int sheetSquare)
+    private static Point16 GetTileOrigin(int i, int j, int width, int height, int sheetSquare)
     {
         Tile tile = Main.tile[i, j];
         int x = i - tile.TileFrameX % (width * sheetSquare) / sheetSquare;

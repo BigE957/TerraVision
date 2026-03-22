@@ -43,6 +43,11 @@ public class TVDrawSystem : ModSystem
             if (kvp.Value is not TVTileEntity tvEntity || !tvEntity.IsOn)
                 continue;
 
+            int tileType = Main.tile[tvEntity.Position.X, tvEntity.Position.Y].TileType;
+
+            if (TileLoader.GetTile(tileType) is BaseTVTile baseTVTile && !baseTVTile.DrawsScreenNormally())
+                continue;
+
             Rectangle tvBounds = new(tvEntity.Position.X * 16, tvEntity.Position.Y * 16, tvEntity.Size.X * 16, tvEntity.Size.Y * 16);
 
             if (!screenBounds.Intersects(tvBounds))

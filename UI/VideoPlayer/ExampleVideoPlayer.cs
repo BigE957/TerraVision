@@ -390,7 +390,7 @@ public class ExampleVideoPlayerUI : UIState
 /// </summary>
 public class ExampleVideoUISystem : ModSystem
 {
-    internal static Asset<Texture2D> Background;
+    public static Asset<Texture2D> Background;
 
     private UserInterface _videoUserInterface;
     internal ExampleVideoPlayerUI _videoUI;
