@@ -63,7 +63,7 @@ public class TVSky : CustomSky
             var player = tvEntity.GetVideoPlayer();
             bool needsStatic = player == null || (!player.IsPlaying && !player.IsLoading && !player.IsPreparing);
             if (needsStatic)
-                tvEntity.DrawStatic(spriteBatch, new Rectangle(0, 0, Main.ScreenSize.X, Main.ScreenSize.Y));
+                tvEntity.DrawStatic(spriteBatch, new Rectangle(0, 0, Main.ScreenSize.X, Main.ScreenSize.Y), opacity);
             else
                 player.Draw(spriteBatch, Vector2.Zero, Main.ScreenSize.ToVector2(), ExampleVideoUISystem.Background.Value);
         }

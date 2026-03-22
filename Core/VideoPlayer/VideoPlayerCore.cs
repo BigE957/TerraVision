@@ -1162,18 +1162,18 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         if (backgroundColor != default)
             spriteBatch.Draw(pixel, targetRect, backgroundColor);
 
-        DrawCore(spriteBatch, pixel, targetRect.Location.ToVector2(), new Vector2(targetRect.Width, targetRect.Height));
+        DrawCore(spriteBatch, pixel, targetRect.Location.ToVector2(), new Vector2(targetRect.Width, targetRect.Height), 1f);
     }
 
     /// <summary>
     /// Draw overload for world-space tile entities — takes Vector2 position and size.
     /// </summary>
-    public void Draw(SpriteBatch spriteBatch, Vector2 position, Vector2 size, Texture2D pixel)
+    public void Draw(SpriteBatch spriteBatch, Vector2 position, Vector2 size, Texture2D pixel, float opacity = 1f)
     {
-        DrawCore(spriteBatch, pixel, position, size);
+        DrawCore(spriteBatch, pixel, position, size, opacity);
     }
 
-    private void DrawCore(SpriteBatch spriteBatch, Texture2D pixel, Vector2 position, Vector2 size)
+    private void DrawCore(SpriteBatch spriteBatch, Texture2D pixel, Vector2 position, Vector2 size, float opacity)
     {
         Rectangle targetRect = new((int)position.X, (int)position.Y, (int)size.X, (int)size.Y);
         Rectangle videoRect = CalculateRenderRectangle(targetRect);
@@ -1183,7 +1183,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             try
             {
                 // Maintain aspect ratio within the target area               
-                spriteBatch.Draw(_videoTexture, videoRect, Color.White);
+                spriteBatch.Draw(_videoTexture, videoRect, Color.White * opacity);
             }
             catch (Exception ex)
             {
@@ -1196,7 +1196,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             Vector2 center = position + size / 2f;
             // Scale spinner radius and dot size proportionally to the draw area
             float spinnerRadius = Math.Min(size.X, size.Y) * 0.07f;
-            float dotSize = Math.Max(2f, spinnerRadius * 0.35f);
+            float dotSize = Math.Max(2f, spinnerRadius * 0.35f) * opacity;
             DrawLoadingSpinner(spriteBatch, pixel, center, spinnerRadius, dotSize);
         }
 
@@ -1204,10 +1204,10 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             return;
 
         // Danmaku overlay
-        _danmakuRenderer.Draw(spriteBatch, videoRect, _danmakuTimer);
+        _danmakuRenderer.Draw(spriteBatch, videoRect, _danmakuTimer, opacity);
 
         // Caption overlay
-        _captionRenderer.Draw(spriteBatch, videoRect, GetTimeSeconds(), pixel);
+        _captionRenderer.Draw(spriteBatch, videoRect, GetTimeSeconds(), pixel, opacity);
     }
 
     private void DrawLoadingSpinner(SpriteBatch spriteBatch, Texture2D pixel, Vector2 center, float radius, float dotSize)

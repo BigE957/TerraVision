@@ -106,7 +106,7 @@ public class DanmakuRenderer
 
     public void Clear() => _comments.Clear();
 
-    public void Draw(SpriteBatch spriteBatch, Rectangle videoRect, float currentTime)
+    public void Draw(SpriteBatch spriteBatch, Rectangle videoRect, float currentTime, float opacity)
     {
         if (_comments.Count == 0)
             return;
@@ -183,6 +183,7 @@ public class DanmakuRenderer
             // Fade out over the last 20% of the comment's lifetime
             float fadeStart = duration * 0.8f;
             float alpha = age > fadeStart ? 1f - ((age - fadeStart) / (duration - fadeStart)) : 1f;
+            alpha *= opacity;
 
             var color = new Color((comment.Color >> 16) & 0xFF, (comment.Color >> 8) & 0xFF, comment.Color & 0xFF) * alpha;
 

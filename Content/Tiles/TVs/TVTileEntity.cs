@@ -203,7 +203,7 @@ public class TVTileEntity : ModTileEntity
     private static Asset<Texture2D> _staticTexture;
     private Vector2 _staticOffset;
 
-    public void DrawStatic(SpriteBatch spriteBatch, Rectangle screenArea)
+    public void DrawStatic(SpriteBatch spriteBatch, Rectangle screenArea, float opacity = 1f)
     {
         try
         {
@@ -219,7 +219,7 @@ public class TVTileEntity : ModTileEntity
 
             Rectangle sourceRect = new((int)_staticOffset.X, (int)_staticOffset.Y, Math.Min(_staticTexture.Width(), screenArea.Width), Math.Min(_staticTexture.Height(), screenArea.Height));
 
-            spriteBatch.Draw(_staticTexture.Value, screenArea, sourceRect, Color.White);
+            spriteBatch.Draw(_staticTexture.Value, screenArea, sourceRect, Color.White * opacity);
         }
         catch (Exception ex)
         {

@@ -32,7 +32,7 @@ public partial class CaptionRenderer
 
     public void Clear() => _captions.Clear();
 
-    public void Draw(SpriteBatch spriteBatch, Rectangle videoRect, float currentTime, Texture2D pixel)
+    public void Draw(SpriteBatch spriteBatch, Rectangle videoRect, float currentTime, Texture2D pixel, float opacity)
     {
         if (_captions.Count == 0)
             return;
@@ -44,13 +44,13 @@ public partial class CaptionRenderer
         var font = FontAssets.MouseText.Value;
 
         if (active.IsPreformatted)
-            DrawPreformatted(spriteBatch, font, videoRect, active, currentTime, pixel);
+            DrawPreformatted(spriteBatch, font, videoRect, active, currentTime, pixel, opacity);
         else
-            DrawWordWrapped(spriteBatch, font, videoRect, active, currentTime, pixel);
+            DrawWordWrapped(spriteBatch, font, videoRect, active, currentTime, pixel, opacity);
     }
 
 
-    private static void DrawPreformatted(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel)
+    private static void DrawPreformatted(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel, float opacity)
     {
         string text = BuildCurrentLine(active, currentTime);
         if (string.IsNullOrEmpty(text))
@@ -83,19 +83,19 @@ public partial class CaptionRenderer
         float blockY = videoRect.Bottom - BottomMargin - blockH;
 
         // Background
-        spriteBatch.Draw(pixel, new Rectangle((int)(blockX - PaddingX), (int)(blockY - PaddingY), (int)(blockW + PaddingX * 2f), (int)blockH), Color.Black * BackgroundAlpha);
+        spriteBatch.Draw(pixel, new Rectangle((int)(blockX - PaddingX), (int)(blockY - PaddingY), (int)(blockW + PaddingX * 2f), (int)blockH), Color.Black * BackgroundAlpha * opacity);
 
         // Draw each line left-aligned within the block
         float currentY = blockY;
         foreach (string line in lines)
         {
             if (!string.IsNullOrEmpty(line))
-                Utils.DrawBorderString(spriteBatch, line, new Vector2(blockX, currentY), Color.White, scale);
+                Utils.DrawBorderString(spriteBatch, line, new Vector2(blockX, currentY), Color.White * opacity, scale);
             currentY += lineH;
         }
     }
 
-    private static void DrawWordWrapped(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel)
+    private static void DrawWordWrapped(SpriteBatch spriteBatch, DynamicSpriteFont font, Rectangle videoRect, CaptionBlock active, float currentTime, Texture2D pixel, float opacity)
     {
         float playerScale =  videoRect.Width / 640f;
         float scale = BaseTextScale * playerScale;
@@ -124,7 +124,7 @@ public partial class CaptionRenderer
         float blockHeight = totalLines * lineH + PaddingY * playerScale * 2f;
         float blockY = videoRect.Bottom - (BottomMargin * videoRect.Width / 1280f) - blockHeight;
 
-        spriteBatch.Draw(pixel, new Rectangle( (int)(videoRect.X + (videoRect.Width - actualMaxWidth) / 2f - PaddingX * playerScale), (int)(blockY - PaddingY * playerScale), (int)(actualMaxWidth + PaddingX * playerScale * 2f), (int)blockHeight), Color.Black * BackgroundAlpha);
+        spriteBatch.Draw(pixel, new Rectangle( (int)(videoRect.X + (videoRect.Width - actualMaxWidth) / 2f - PaddingX * playerScale), (int)(blockY - PaddingY * playerScale), (int)(actualMaxWidth + PaddingX * playerScale * 2f), (int)blockHeight), Color.Black * BackgroundAlpha * opacity);
 
         float currentY = blockY;
 
@@ -132,7 +132,7 @@ public partial class CaptionRenderer
         foreach (string line in topLines)
         {
             float lineX = videoRect.X + (videoRect.Width - font.MeasureString(line).X * scale) / 2f;
-            Utils.DrawBorderString(spriteBatch, line, new Vector2(lineX, currentY), Color.White * 0.75f, scale);
+            Utils.DrawBorderString(spriteBatch, line, new Vector2(lineX, currentY), Color.White * 0.75f * opacity, scale);
             currentY += lineH;
         }
 
@@ -140,7 +140,7 @@ public partial class CaptionRenderer
         float leftEdge = videoRect.X + (videoRect.Width - actualMaxWidth) / 2f;
         foreach (string line in bottomLines)
         {
-            Utils.DrawBorderString(spriteBatch, line, new Vector2(leftEdge, currentY), Color.White, scale);
+            Utils.DrawBorderString(spriteBatch, line, new Vector2(leftEdge, currentY), Color.White * opacity, scale);
             currentY += lineH;
         }
     }
