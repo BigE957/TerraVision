@@ -230,23 +230,16 @@ public class TVTileEntity : ModTileEntity
 
     public (Vector2 Position, Vector2 Size, Rectangle StaticArea) CalculateScreenAreas()
     {
-        bool cacheValid = _lastCachedZoom == Main.GameViewMatrix.Zoom.X &&
-                          _lastCachedScreenPos == Main.screenPosition;
+        bool cacheValid = _lastCachedZoom == Main.GameViewMatrix.Zoom.X && _lastCachedScreenPos == Main.screenPosition;
 
-        if (cacheValid && _cachedVideoPosition.HasValue &&
-            _cachedVideoSize.HasValue && _cachedStaticArea.HasValue)
-        {
+        if (cacheValid && _cachedVideoPosition.HasValue && _cachedVideoSize.HasValue && _cachedStaticArea.HasValue)
             return (_cachedVideoPosition.Value, _cachedVideoSize.Value, _cachedStaticArea.Value);
-        }
 
         int tileType = Main.tile[Position.X, Position.Y].TileType;
         if (!TileData.TryGetValue(tileType, out var tileInfo))
             return (Vector2.Zero, Vector2.Zero, Rectangle.Empty);
 
-        Rectangle worldArea = new(
-            Position.X * 16, Position.Y * 16,
-            tileInfo.TileSize.X * 16, tileInfo.TileSize.Y * 16
-        );
+        Rectangle worldArea = new(Position.X * 16, Position.Y * 16, tileInfo.TileSize.X * 16, tileInfo.TileSize.Y * 16);
 
         worldArea.X += tileInfo.ScreenOffsets.X;
         worldArea.Y += tileInfo.ScreenOffsets.Y;
@@ -263,9 +256,7 @@ public class TVTileEntity : ModTileEntity
         Vector2 finalPos = (screenPos - screenCenter) * zoom + screenCenter;
         Vector2 finalSize = new Vector2(worldArea.Width, worldArea.Height) * zoom;
 
-        Rectangle staticArea = new(
-            (int)screenPos.X, (int)screenPos.Y, worldArea.Width, worldArea.Height
-        );
+        Rectangle staticArea = new((int)screenPos.X, (int)screenPos.Y, worldArea.Width, worldArea.Height);
 
         _cachedVideoPosition = finalPos;
         _cachedVideoSize = finalSize;
