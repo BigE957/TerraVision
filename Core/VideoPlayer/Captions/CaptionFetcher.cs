@@ -321,8 +321,7 @@ public static partial class CaptionFetcher
     /// YouTube, Bilibili, or Vimeo. No auth, VTT preferred over SRT.
     /// Low hit rate in practice but adds no complexity for the caller.
     /// </summary>
-    private static async Task<List<CaptionBlock>> FetchGenericAsync(
-        string url, string ytdlpPath, CancellationToken token = default)
+    private static async Task<List<CaptionBlock>> FetchGenericAsync(string url, string ytdlpPath, CancellationToken token = default)
     {
         try
         {
@@ -631,6 +630,7 @@ public static partial class CaptionFetcher
             else
             {
                 string cleaned = InlineTagRegex().Replace(firstLine, "").Trim();
+                cleaned = DecodeEntities(cleaned);
                 cleaned = cleaned.Replace(">>", "").Trim();
                 cleaned = MultiSpaceRegex().Replace(cleaned, " ");
                 prevLine = string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
@@ -720,7 +720,7 @@ public static partial class CaptionFetcher
             {
                 // Strip HTML inline tags but preserve all other characters including
                 // Unicode, Braille, and full-width characters used in ASCII art captions.
-                string cleaned = InlineTagRegex().Replace(lines[i], "").TrimEnd();
+                string cleaned = DecodeEntities(InlineTagRegex().Replace(lines[i], "").TrimEnd());
                 textLines.Add(cleaned);
                 i++;
             }
@@ -778,7 +778,7 @@ public static partial class CaptionFetcher
                 while (i < lines.Length && !string.IsNullOrEmpty(lines[i].Trim()))
                 {
                     // Strip SRT formatting tags (<i>, <b>, <font ...>, etc.)
-                    string cleaned = InlineTagRegex().Replace(lines[i].Trim(), "").Trim();
+                    string cleaned = DecodeEntities(InlineTagRegex().Replace(lines[i].Trim(), "").Trim());
                     if (!string.IsNullOrEmpty(cleaned))
                         textLines.Add(cleaned);
                     i++;
@@ -839,7 +839,7 @@ public static partial class CaptionFetcher
         foreach (Match match in WordTokenRegex().Matches(rawText))
         {
             string ts = match.Groups["ts"].Value;
-            string word = match.Groups["word"].Value.Trim();
+            string word = DecodeEntities(match.Groups["word"].Value.Trim());
 
             if (!string.IsNullOrWhiteSpace(ts))
                 timestamp = ParseVttTime(ts);
@@ -874,6 +874,25 @@ public static partial class CaptionFetcher
             return float.Parse(m.Groups[1].Value, c) * 3600f + float.Parse(m.Groups[2].Value, c) * 60f + float.Parse(m.Groups[3].Value, c) + float.Parse(m.Groups[4].Value, c) / 1000f;
         }
         catch { return 0f; }
+    }
+
+    /// <summary>
+    /// Decodes HTML entities and normalises non-breaking spaces to regular spaces.
+    /// Applied after tag stripping so that entity sequences like &amp;nbsp; in the
+    /// raw VTT text are resolved before any further string comparisons (e.g. the >>
+    /// speaker marker arrives as &gt;&gt; and must be decoded before Replace fires).
+    /// </summary>
+    private static string DecodeEntities(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        string decoded = System.Net.WebUtility.HtmlDecode(text);
+
+        // Non-breaking space (U+00A0) — used by YouTube to pad censored words.
+        // Terraria's font has no glyph for it; convert to a regular space so the
+        // surrounding brackets and underscores render correctly.
+        return decoded.Replace('\u00A0', ' ');
     }
 
     /// <summary>
