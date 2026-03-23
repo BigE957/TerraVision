@@ -4,26 +4,23 @@ using ReLogic.Content;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.Enums;
+using Terraria.Graphics.Effects;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.ObjectData;
 
 namespace TerraVision.Content.Tiles.TVs;
 
-public class BoxTVTile : BaseTVTile
+public class BoxTV : BaseTVTile
 {
-    public override Point16 GetTVDimensions() => new(6, 3);
+    public override Point16 GetTVDimensions() => new(5, 6);
 
     public override string GetTVStyleName() => "Box TV";
 
     private Asset<Effect> _greyscaleShader;
-    public override Asset<Effect> GetShaderEffect() => _greyscaleShader;
+    private static Asset<Texture2D> Overlay;
 
-    public override void Load()
-    {
-        if (!Main.dedServ)
-            _greyscaleShader = ModContent.Request<Effect>("TerraVision/Assets/Effects/Greyscale");
-    }
+    public override Asset<Effect> GetShaderEffect() => _greyscaleShader;
 
     public override void Unload()
     {
@@ -62,7 +59,19 @@ public class BoxTVTile : BaseTVTile
 
         DustType = DustID.Iron;
 
-        TVTileEntity.TileData[Type] = (GetTVDimensions().ToPoint(), new Rectangle(8, 8, -32, -8));
+        TVTileEntity.TileData[Type] = (GetTVDimensions().ToPoint(), new Rectangle(12, 46, -26, -14));
+
+        if (!Main.dedServ)
+        {
+            _greyscaleShader = ModContent.Request<Effect>("TerraVision/Assets/Effects/Greyscale");
+            Overlay = ModContent.Request<Texture2D>("TerraVision/Content/Tiles/TVs/BoxTVOverlay");
+        }
+    }
+
+    public override void PostDrawTVScreen(SpriteBatch spritebatch, TVTileEntity tvEntity)
+    {
+        spritebatch.Draw(Overlay.Value, tvEntity.Position.ToWorldCoordinates(0, 0) - Main.screenPosition, Lighting.GetColor(tvEntity.Position.ToPoint() + new Point(6, 9)));
+
     }
 }
 
@@ -86,6 +95,6 @@ public class BoxTVItem : ModItem
         Item.consumable = true;
         Item.value = Item.buyPrice(1, 0, 0, 0);
         Item.rare = ItemRarityID.Green;
-        Item.createTile = ModContent.TileType<BoxTVTile>();
+        Item.createTile = ModContent.TileType<BoxTV>();
     }
 }

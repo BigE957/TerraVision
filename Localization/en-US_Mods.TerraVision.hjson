@@ -1,5 +1,5 @@
 Tiles: {
-	BoxTVTile.MapEntry: Box TV
+	BoxTV.MapEntry: Box TV
 	CassettePlayer.MapEntry: Cassette Player
 	FlatscreenTVTile.MapEntry: Flatscreen TV
 	StreamingPlayer.MapEntry: Streaming Player
