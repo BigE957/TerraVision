@@ -34,7 +34,7 @@ public class TVRemoteUI : UIState
         Append(_mainPanel);
 
         // Title
-        UIText title = new UIText("TV Remote", 1.2f)
+        UIText title = new("TV Remote", 1.2f)
         {
             HAlign = 0.5f
         };
@@ -42,12 +42,12 @@ public class TVRemoteUI : UIState
         _mainPanel.Append(title);
 
         // Channel controls
-        UIText channelLabel = new UIText("Channel:", 0.9f);
+        UIText channelLabel = new("Channel:", 0.9f);
         channelLabel.Left.Set(20f, 0f);
         channelLabel.Top.Set(50f, 0f);
         _mainPanel.Append(channelLabel);
 
-        UITextPanel<string> channelDown = new UITextPanel<string>("<");
+        UITextPanel<string> channelDown = new("<");
         channelDown.Width.Set(30f, 0f);
         channelDown.Height.Set(30f, 0f);
         channelDown.Left.Set(120f, 0f);
@@ -60,7 +60,7 @@ public class TVRemoteUI : UIState
         _channelText.Top.Set(50f, 0f);
         _mainPanel.Append(_channelText);
 
-        UITextPanel<string> channelUp = new UITextPanel<string>(">");
+        UITextPanel<string> channelUp = new(">");
         channelUp.Width.Set(30f, 0f);
         channelUp.Height.Set(30f, 0f);
         channelUp.Left.Set(200f, 0f);
@@ -69,12 +69,12 @@ public class TVRemoteUI : UIState
         _mainPanel.Append(channelUp);
 
         // Volume controls
-        UIText volumeLabel = new UIText("Volume:", 0.9f);
+        UIText volumeLabel = new("Volume:", 0.9f);
         volumeLabel.Left.Set(20f, 0f);
         volumeLabel.Top.Set(90f, 0f);
         _mainPanel.Append(volumeLabel);
 
-        UITextPanel<string> volumeDown = new UITextPanel<string>("-");
+        UITextPanel<string> volumeDown = new("-");
         volumeDown.Width.Set(30f, 0f);
         volumeDown.Height.Set(30f, 0f);
         volumeDown.Left.Set(120f, 0f);
@@ -87,7 +87,7 @@ public class TVRemoteUI : UIState
         _volumeText.Top.Set(90f, 0f);
         _mainPanel.Append(_volumeText);
 
-        UITextPanel<string> volumeUp = new UITextPanel<string>("+");
+        UITextPanel<string> volumeUp = new("+");
         volumeUp.Width.Set(30f, 0f);
         volumeUp.Height.Set(30f, 0f);
         volumeUp.Left.Set(200f, 0f);
@@ -96,7 +96,7 @@ public class TVRemoteUI : UIState
         _mainPanel.Append(volumeUp);
 
         // Power button
-        UITextPanel<string> powerButton = new UITextPanel<string>("Power OFF");
+        UITextPanel<string> powerButton = new("Power OFF");
         powerButton.Width.Set(120f, 0f);
         powerButton.Height.Set(35f, 0f);
         powerButton.HAlign = 0.5f;
@@ -105,7 +105,7 @@ public class TVRemoteUI : UIState
         _mainPanel.Append(powerButton);
 
         // Close button
-        UITextPanel<string> closeButton = new UITextPanel<string>("Close");
+        UITextPanel<string> closeButton = new("Close");
         closeButton.Width.Set(60f, 0f);
         closeButton.Height.Set(25f, 0f);
         closeButton.HAlign = 1f;

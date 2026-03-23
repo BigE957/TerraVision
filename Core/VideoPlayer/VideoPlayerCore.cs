@@ -1260,7 +1260,7 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                 );
 
                 int d = (int)dotSize;
-                Rectangle dotRect = new Rectangle(
+                Rectangle dotRect = new(
                     (int)(center.X + offset.X - d / 2),
                     (int)(center.Y + offset.Y - d / 2),
                     d, d
@@ -1392,7 +1392,7 @@ public class VideoFrameHandler : IDisposable
     private readonly int _height;
     private readonly int _frameSize;
     private bool _hasNewFrame;
-    private readonly object _frameLock = new object();
+    private readonly object _frameLock = new();
     private GCHandle _frameHandle;
 
     private byte[] _conversionBuffer;

@@ -95,8 +95,7 @@ public class TVTileEntity : ModTileEntity
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             int tile = Main.tile[i, j].TileType;
-            NetMessage.SendTileSquare(Main.myPlayer, i, j,
-                TileData[tile].TileSize.X, TileData[tile].TileSize.Y);
+            NetMessage.SendTileSquare(Main.myPlayer, i, j, TileData[tile].TileSize.X, TileData[tile].TileSize.Y);
             NetMessage.SendData(MessageID.TileEntityPlacement, -1, -1, null, i, j, Type);
             return -1;
         }
@@ -211,12 +210,7 @@ public class TVTileEntity : ModTileEntity
             _staticTexture ??= ModContent.Request<Texture2D>("TerraVision/Assets/ExtraTextures/StaticNoise");
 
             if ((int)(Main.GlobalTimeWrappedHourly * 60) % 3 == 0)
-            {
-                _staticOffset = new Vector2(
-                    Main.rand.Next(0, Math.Max(1, _staticTexture.Width() - screenArea.Width)),
-                    Main.rand.Next(0, Math.Max(1, _staticTexture.Height() - screenArea.Height))
-                );
-            }
+                _staticOffset = new(Main.rand.Next(0, Math.Max(1, _staticTexture.Width() - screenArea.Width)), Main.rand.Next(0, Math.Max(1, _staticTexture.Height() - screenArea.Height)));
 
             Rectangle sourceRect = new((int)_staticOffset.X, (int)_staticOffset.Y, Math.Min(_staticTexture.Width(), screenArea.Width), Math.Min(_staticTexture.Height(), screenArea.Height));
 
@@ -249,7 +243,7 @@ public class TVTileEntity : ModTileEntity
         if (!TileData.TryGetValue(tileType, out var tileInfo))
             return (Vector2.Zero, Vector2.Zero, Rectangle.Empty);
 
-        Rectangle worldArea = new Rectangle(
+        Rectangle worldArea = new(
             Position.X * 16, Position.Y * 16,
             tileInfo.TileSize.X * 16, tileInfo.TileSize.Y * 16
         );
@@ -261,15 +255,15 @@ public class TVTileEntity : ModTileEntity
         worldArea.Width += tileInfo.ScreenOffsets.Width;
         worldArea.Height += tileInfo.ScreenOffsets.Height;
 
-        Vector2 worldPos = new Vector2(worldArea.X, worldArea.Y);
+        Vector2 worldPos = new(worldArea.X, worldArea.Y);
         Vector2 screenPos = worldPos - Main.screenPosition;
         float zoom = Main.GameViewMatrix.Zoom.X;
-        Vector2 screenCenter = new Vector2(Main.screenWidth / 2f, Main.screenHeight / 2f);
+        Vector2 screenCenter = new(Main.screenWidth / 2f, Main.screenHeight / 2f);
 
         Vector2 finalPos = (screenPos - screenCenter) * zoom + screenCenter;
         Vector2 finalSize = new Vector2(worldArea.Width, worldArea.Height) * zoom;
 
-        Rectangle staticArea = new Rectangle(
+        Rectangle staticArea = new(
             (int)screenPos.X, (int)screenPos.Y, worldArea.Width, worldArea.Height
         );
 

@@ -49,8 +49,8 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
 
     private bool _isInitialized = false;
 
-    private static readonly Color CaptionsActiveColor = new Color(63, 82, 151);
-    private static readonly Color CaptionsDimColor = new Color(30, 40, 75);
+    private static readonly Color CaptionsActiveColor = new(63, 82, 151);
+    private static readonly Color CaptionsDimColor = new(30, 40, 75);
 
     public override void OnInitialize()
     {
