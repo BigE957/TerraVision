@@ -80,7 +80,7 @@ public class BilibiliExtractor
             var cookies = await ReadCookiesAsync(url, token);
             string cookieHeader = BuildCookieHeader(cookies);
 
-            long cid = await FetchCidAsync(bvid, cookieHeader, token);
+            var (cid, title) = await FetchCidAsync(bvid, cookieHeader, token);
             if (cid <= 0)
             {
                 TerraVision.instance.Logger.Warn($"[Bilibili] Failed to fetch CID for {bvid}");
@@ -96,7 +96,10 @@ public class BilibiliExtractor
 
             var streamResult = await FetchPlayUrlAsync(bvid, cid, mixinKey, cookieHeader, token);
             if (streamResult != null)
+            {
+                streamResult.Title = title;
                 TerraVision.instance.Logger.Info($"[Bilibili] Direct stream extraction successful for {bvid}");
+            }
 
             return streamResult;
         }
@@ -114,7 +117,7 @@ public class BilibiliExtractor
         return match.Success ? match.Value : null;
     }
 
-    private async Task<long> FetchCidAsync(string bvid, string cookieHeader, CancellationToken token)
+    private async Task<(long Cid, string Title)> FetchCidAsync(string bvid, string cookieHeader, CancellationToken token)
     {
         string apiUrl = $"https://api.bilibili.com/x/web-interface/view?bvid={bvid}";
         using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
@@ -130,10 +133,14 @@ public class BilibiliExtractor
         if (root.GetProperty("code").GetInt32() != 0)
         {
             TerraVision.instance.Logger.Debug($"[Bilibili] view API error: {root.GetProperty("message").GetString()}");
-            return -1;
+            return (-1, null);
         }
 
-        return root.GetProperty("data").GetProperty("cid").GetInt64();
+        var data = root.GetProperty("data");
+        long cid = data.GetProperty("cid").GetInt64();
+        string title = data.TryGetProperty("title", out var t) ? t.GetString() : null;
+
+        return (cid, title);
     }
 
     private async Task<string> FetchWbiMixinKeyAsync(string cookieHeader, CancellationToken token)
