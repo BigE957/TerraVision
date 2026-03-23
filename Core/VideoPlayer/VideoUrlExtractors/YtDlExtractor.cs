@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Xna.Framework;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -515,10 +516,13 @@ public class YtDlExtractor : IVideoUrlExtractor
 
         try
         {
-            var options = new OptionSet() { NoPlaylist = true };
+            var options = new OptionSet()
+            {
+                NoPlaylist = true,
+                Quiet = true,
+                NoWarnings = true
+            };
 
-            // Inject cookies if available — unlocks age-restricted/members content
-            // and higher resolutions for Premium accounts (e.g. Bilibili 1080p+)
             string cookiesPath = CookieManager.GetFolderCookiesPath(url);
             if (cookiesPath != null)
             {
@@ -526,40 +530,41 @@ public class YtDlExtractor : IVideoUrlExtractor
                 TerraVision.instance.Logger.Debug($"[YtDlp] Using saved cookies for {CookieManager.ExtractDomain(url)}");
             }
 
-            int? maxHeight = ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
-            if (maxHeight.HasValue)
-                options.Format = BuildFormatSelector(maxHeight.Value);
+            int? maxHeight = Terraria.ModLoader.ModContent.GetInstance<TerraVisionConfig>()?.MaxVideoHeight();
+            options.Format = BuildFormatSelector(maxHeight);
 
             var result = await _ytdl.RunVideoDataFetch(url, ct: cancellationToken, overrideOptions: options);
 
             if (!result.Success || result.Data == null)
             {
-                TerraVision.instance.Logger.Warn($"yt-dlp failed to fetch data: {string.Join(", ", result.ErrorOutput ?? Array.Empty<string>())}");
+                bool knownError = NotifyAuthError(result.ErrorOutput, url);
+                if (!knownError)
+                    TerraVision.instance.Logger.Warn($"yt-dlp failed to fetch data: {string.Join(", ", result.ErrorOutput ?? [])}");
                 return null;
             }
 
             var streamResult = new VideoStreamResult();
 
-            // Bilibili CDN requires Referer on every request or returns 403
+            streamResult.IsLivestream = result.Data.IsLive ?? false;
+
             if (url.Contains("bilibili.com"))
                 streamResult.HttpHeaders["Referer"] = "https://www.bilibili.com";
 
-            // Case 1: single combined stream URL (YouTube, most other sites)
+            PopulateMetadata(streamResult, result.Data);
+
             if (!string.IsNullOrWhiteSpace(result.Data.Url))
             {
                 streamResult.VideoUrl = result.Data.Url;
-                TerraVision.instance.Logger.Info("yt-dlp: using top-level combined URL");
+                TerraVision.instance.Logger.Info($"yt-dlp: using top-level URL (livestream: {streamResult.IsLivestream})");
                 return streamResult;
             }
 
-            // Case 2: separate DASH streams (Bilibili and others)
             if (result.Data.Formats != null)
             {
                 TerraVision.instance.Logger.Debug("Top-level URL null, selecting from DASH formats...");
 
                 var formats = result.Data.Formats;
 
-                // Prefer a format with both codecs in one stream
                 var combined = formats
                     .Where(f => !string.IsNullOrWhiteSpace(f.Url)
                              && f.VideoCodec != "none" && !string.IsNullOrWhiteSpace(f.VideoCodec)
@@ -575,7 +580,6 @@ public class YtDlExtractor : IVideoUrlExtractor
                     return streamResult;
                 }
 
-                // Separate video and audio tracks
                 var bestVideo = formats
                     .Where(f => !string.IsNullOrWhiteSpace(f.Url)
                              && f.VideoCodec != "none" && !string.IsNullOrWhiteSpace(f.VideoCodec)
@@ -614,6 +618,125 @@ public class YtDlExtractor : IVideoUrlExtractor
             TerraVision.instance.Logger.Error($"yt-dlp URL extraction failed: {ex.Message}");
             return null;
         }
+    }
+
+    private static void PopulateMetadata(VideoStreamResult streamResult, YoutubeDLSharp.Metadata.VideoData data)
+    {
+        streamResult.Title = data.Title;// CleanTitle(data.Title);
+
+        if (data.Chapters == null)
+            return;
+
+        foreach (var c in data.Chapters)
+        {
+            streamResult.Chapters.Add(new VideoChapter
+            {
+                StartTime = (float)(c.StartTime ?? 0),
+                EndTime = (float)(c.EndTime ?? 0),
+                Title = c.Title ?? ""
+            });
+        }
+    }
+
+    /// <summary>
+    /// Strips trailing date/time patterns that yt-dlp appends to some video titles.
+    /// Matches patterns like " 2024-01-15", " 2024-01-15 14:30", " 2024-01-15 14:30:00".
+    /// </summary>
+    private static string CleanTitle(string title)
+    {
+        if (string.IsNullOrEmpty(title))
+            return title;
+
+        // Walk backwards from end: strip optional time (HH:MM or HH:MM:SS), then date (YYYY-MM-DD)
+        string t = title.TrimEnd();
+
+        // Optional time component
+        if (t.Length >= 5 && t[^2] != '-')
+        {
+            int timeStart = t.Length - 5; // HH:MM
+            if (t[timeStart + 2] == ':' && IsDigits(t, timeStart, 2) && IsDigits(t, timeStart + 3, 2))
+            {
+                // Check for seconds: HH:MM:SS
+                if (timeStart >= 3 && t[timeStart - 1] == ':' && IsDigits(t, timeStart - 3, 2))
+                    timeStart -= 3;
+                t = t[..timeStart].TrimEnd();
+            }
+        }
+
+        // Date component YYYY-MM-DD
+        if (t.Length >= 10)
+        {
+            int dateStart = t.Length - 10;
+            if (t[dateStart + 4] == '-' && t[dateStart + 7] == '-' &&
+                IsDigits(t, dateStart, 4) && IsDigits(t, dateStart + 5, 2) && IsDigits(t, dateStart + 8, 2))
+            {
+                t = t[..dateStart].TrimEnd();
+            }
+        }
+
+        return string.IsNullOrEmpty(t) ? title : t;
+    }
+
+    private static bool IsDigits(string s, int start, int count)
+    {
+        for (int i = start; i < start + count && i < s.Length; i++)
+            if (!char.IsDigit(s[i])) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Inspects yt-dlp error output and fires a targeted in-game message for known
+    /// auth-related failures. Returns true if a specific message was shown, false if
+    /// the error was unrecognised (caller should show a generic failure message).
+    /// </summary>
+    private static bool NotifyAuthError(string[] errorOutput, string url)
+    {
+        if (errorOutput == null || errorOutput.Length == 0)
+            return false;
+
+        string combined = string.Join(" ", errorOutput).ToLowerInvariant();
+
+        bool hasCookies = CookieManager.GetFolderCookiesPath(url) != null;
+        string domain = CookieManager.ExtractDomain(url) ?? "this site";
+        string cookieHint = hasCookies ? $"Try refreshing your cookies with /tvsetup cookies {domain}" : $"Run /tvsetup cookies to save your browser login for {domain}";
+
+        if (combined.Contains("members only") || combined.Contains("members-only") || combined.Contains("membersonly"))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText($"This video is members-only. {cookieHint}.", Color.Orange));
+            return true;
+        }
+
+        if (combined.Contains("sign in") || combined.Contains("login required") || combined.Contains("not logged in"))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText($"This video requires a login. {cookieHint}.", Color.Orange));
+            return true;
+        }
+
+        if (combined.Contains("age") && (combined.Contains("restrict") || combined.Contains("confirm") || combined.Contains("limit")))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText($"This video is age-restricted. {cookieHint}.", Color.Orange));
+            return true;
+        }
+
+        if (combined.Contains("private video") || combined.Contains("this video is private"))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText("This video is private and cannot be played.", Color.Orange));
+            return true;
+        }
+
+        if (combined.Contains("subscriber") || combined.Contains("subscription required"))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText($"This content requires a subscription. {cookieHint}.", Color.Orange));
+            return true;
+        }
+
+        if (combined.Contains("429") || combined.Contains("rate limit") || combined.Contains("too many requests"))
+        {
+            Main.QueueMainThreadAction(() => Main.NewText("Rate limited — please wait a moment before trying again.", Color.Orange));
+            return true;
+        }
+
+        return false;
     }
 
     public async Task<string> SearchAsync(string searchQuery, int resultIndex, int maxResults, CancellationToken cancellationToken = default)

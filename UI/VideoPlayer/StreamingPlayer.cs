@@ -1,8 +1,10 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using Microsoft.Xna.Framework.Media;
 using ReLogic.Content;
 using System;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.GameContent.UI.Elements;
 using Terraria.GameInput;
@@ -17,7 +19,7 @@ namespace TerraVision.UI.VideoPlayer;
 public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
 {
     internal DraggableUIPanel _mainPanel;
-    internal MediaPlayerEntity _videoPlayer = entity;
+    internal MediaPlayerEntity _mediaPlayer = entity;
     private UIPanel _controlPanel;
     private UIPanel _urlPanel;
     private UIPanel _timelinePanel;
@@ -41,8 +43,14 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
     private UIText _currentTimeText;
     private UIText _totalTimeText;
 
+    private UIText _titleText;
+    private readonly List<UIRectangle> _chapterTicks = [];
+    private string _hoveredChapterTitle = null;
 
     private bool _isInitialized = false;
+
+    private static readonly Color CaptionsActiveColor = new Color(63, 82, 151);
+    private static readonly Color CaptionsDimColor = new Color(30, 40, 75);
 
     public override void OnInitialize()
     {
@@ -58,6 +66,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
 
         _mainPanel.ShouldDrag = () => {
             if (_timelinePanel != null && _timelinePanel.IsMouseHovering) return false;
+            if (_titleText != null && _titleText.IsMouseHovering) return false;
             if (_urlInput != null && _urlInput.IsMouseHovering) return false;
             if (_loadButton != null && _loadButton.IsMouseHovering) return false;
             if (_playButton != null && _playButton.IsMouseHovering) return false;
@@ -117,6 +126,12 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         _timelinePanel.Top.Set(-130, 1f);
         _timelinePanel.BackgroundColor = new Color(25, 33, 63);
 
+        // Title
+        _titleText = new UIText("", 0.85f);
+        _titleText.HAlign = 0.5f;
+        _titleText.Top.Set(-155, 1f);  // timeline is at -130, panel is 50 tall, title sits above it
+        _mainPanel.Append(_titleText);
+
         // Current time
         _currentTimeText = new UIText("0:00", 0.8f);
         _currentTimeText.Left.Set(10, 0f);
@@ -139,7 +154,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         _timelineBar.Append(_timelineProgress);
 
         // Scrubber
-        _timelineScrubber = new DraggableTimelineScrubber(_videoPlayer);
+        _timelineScrubber = new DraggableTimelineScrubber(_mediaPlayer);
         _timelineScrubber.Width.Set(12, 0f);
         _timelineScrubber.Height.Set(20, 0f);
         _timelineScrubber.Left.Set(-6, 0f);
@@ -160,7 +175,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         float relativeX = evt.MousePosition.X - dims.X;
         float percentage = Math.Clamp(relativeX / dims.Width, 0f, 1f);
 
-        _videoPlayer.player.Seek(percentage);
+        _mediaPlayer.player.Seek(percentage);
     }
 
     private void SetupControlPanel()
@@ -202,7 +217,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         _stopButton.OnLeftClick += OnStopClicked;
         _controlPanel.Append(_stopButton);
 
-        _captionsButton = new UITextPanel<string>("CC: On");
+        _captionsButton = new UITextPanel<string>("Captions");
         _captionsButton.Width.Set(buttonWidth, 0f);
         _captionsButton.Height.Set(40, 0f);
         _captionsButton.Left.Set(startX + (buttonWidth + buttonSpacing) * 3, 0f);
@@ -229,18 +244,18 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
             return;
         }
 
-        _videoPlayer.player.Play(input);
+        _mediaPlayer.player.Play(input);
     }
 
     private void OnPlayClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        if (_videoPlayer.player.IsPaused)
-            _videoPlayer.player.Resume();
-        else if (!_videoPlayer.player.IsPlaying)
+        if (_mediaPlayer.player.IsPaused)
+            _mediaPlayer.player.Resume();
+        else if (!_mediaPlayer.player.IsPlaying)
         {
             string input = _urlInput.Text;
             if (!string.IsNullOrWhiteSpace(input))
-                _videoPlayer.player.Play(input);
+                _mediaPlayer.player.Play(input);
             else
                 Main.NewText("Please enter something to play!", Color.Orange);
         }
@@ -248,19 +263,21 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
 
     private void OnPauseClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        _videoPlayer.player.Pause();
+        _mediaPlayer.player.Pause();
     }
 
     private void OnStopClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        _videoPlayer.player.Stop();
+        _mediaPlayer.player.Stop();
     }
 
     private void OnCaptionsClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        bool newState = !_videoPlayer.player.CaptionsEnabled;
-        _videoPlayer.player.SetCaptionsEnabled(newState);
-        _captionsButton.SetText(newState ? "CC: On" : "CC: Off");
+        bool globalEnabled = ModContent.GetInstance<TerraVisionConfig>()?.EnableCaptions ?? true;
+        if (!globalEnabled)
+            return;
+
+        _mediaPlayer.player.SetCaptionsEnabled(!_mediaPlayer.player.CaptionsEnabled);
     }
 
     private void OnCloseClicked(UIMouseEvent evt, UIElement listeningElement)
@@ -276,7 +293,7 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
             Main.LocalPlayer.mouseInterface = true;
 
         // Show/hide timeline based on video state
-        bool hasVideo = _videoPlayer != null && (_videoPlayer.player.IsPlaying || _videoPlayer.player.IsPaused);
+        bool hasVideo = _mediaPlayer != null && (_mediaPlayer.player.IsPlaying || _mediaPlayer.player.IsPaused);
         if (hasVideo && _timelinePanel.Parent == null)
         {
             _mainPanel.Append(_timelinePanel);
@@ -300,10 +317,10 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
         }
 
         // Update timeline
-        if (_videoPlayer != null && (_videoPlayer.player.IsPlaying || _videoPlayer.player.IsPaused))
+        if (_mediaPlayer != null && (_mediaPlayer.player.IsPlaying || _mediaPlayer.player.IsPaused))
         {
-            float position = _videoPlayer.player.GetPosition();
-            long duration = _videoPlayer.player.GetDuration();
+            float position = _mediaPlayer.player.GetPosition();
+            long duration = _mediaPlayer.player.GetDuration();
 
             // Update progress bar
             _timelineProgress.Width.Set(position, 1f);
@@ -320,9 +337,45 @@ public class StreamingPlayerUI(MediaPlayerEntity entity) : UIState
             _totalTimeText.SetText(FormatTime(duration));
         }
 
+        _titleText?.SetText(hasVideo ? (_mediaPlayer.player.CurrentTitle ?? "") : "");
+
+        if (_captionsButton != null)
+        {
+            bool globalEnabled = ModContent.GetInstance<TerraVisionConfig>()?.EnableCaptions ?? true;
+            bool localEnabled = _mediaPlayer.player.CaptionsEnabled;
+            _captionsButton.BackgroundColor = (globalEnabled && localEnabled) ? CaptionsActiveColor : CaptionsDimColor;
+        }
+
         // ESC to close (only if text input is not active)
         if (Main.keyState.IsKeyDown(Keys.Escape) && !Main.oldKeyState.IsKeyDown(Keys.Escape) && (_urlInput == null || !urlDeactivated))
             ModContent.GetInstance<StreamingUISystem>().HideUI();
+    }
+
+    private void RefreshChapterTicks()
+    {
+        foreach (var tick in _chapterTicks)
+            _timelineBar.RemoveChild(tick);
+        _chapterTicks.Clear();
+
+        var chapters = _mediaPlayer.player.CurrentChapters;
+        long duration = _mediaPlayer.player.GetDuration();
+        if (chapters == null || chapters.Count == 0 || duration <= 0)
+            return;
+
+        float durationSec = duration / 1000f;
+
+        foreach (var chapter in chapters)
+        {
+            float pct = chapter.StartTime / durationSec;
+
+            var tick = new UIRectangle(Color.White);
+            tick.Width.Set(2, 0f);
+            tick.Height.Set(0, 1f);
+            tick.Left.Set(0, pct);
+            tick.IgnoresMouseInteraction = true;
+            _timelineBar.Append(tick);
+            _chapterTicks.Add(tick);
+        }
     }
 
     private static string FormatTime(long milliseconds)

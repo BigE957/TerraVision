@@ -82,9 +82,10 @@ Configs: {
 				Which browser TerraVision should read login cookies from automatically.
 				Used as a fallback when no saved cookies file exists for a site.
 
-				Cookies unlock features that require a login:
-				  • Bilibili: captions, higher resolutions (Premium)
+				Cookies unlock features that require a login:			  
 				  • YouTube: age-restricted videos, members-only content
+				  • Twitch: subscriber-only VODs
+				  • Bilibili: captions, higher resolutions (Premium)
 
 				'Auto' tries Chrome, Firefox, then Edge in sequence.
 				'Opera GX' is listed separately from Opera — pick the right one.
@@ -118,7 +119,7 @@ Configs: {
 
 		EnableCaptions: {
 			Label: Enable Captions
-			Tooltip: "Globally disables captions, stopping them from even being loaded."
+			Tooltip: Globally disables captions, stopping them from even being loaded.
 		}
 	}
 

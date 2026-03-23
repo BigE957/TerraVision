@@ -7,7 +7,6 @@ using System.Threading.Channels;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ModLoader;
-using YoutubeExplode.Channels;
 using TerraVision.Common;
 
 namespace TerraVision.Core.VideoPlayer;

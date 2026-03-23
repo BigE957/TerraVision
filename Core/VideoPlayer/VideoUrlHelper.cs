@@ -8,8 +8,6 @@ using System.Threading.Tasks;
 using Terraria;
 using Terraria.ModLoader;
 using TerraVision.Core.VideoPlayer.VideoUrlExtractors;
-using YoutubeExplode.Common;
-using YoutubeExplode.Search;
 
 namespace TerraVision.Core.VideoPlayer;
 
@@ -17,15 +15,20 @@ public static class VideoUrlHelper
 {
     private static readonly ConcurrentDictionary<string, (VideoStreamResult Result, DateTime Timestamp, bool IsLivestream)> _urlCache = new();
     private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeRequests = new();
+
+    // Per-URL in-flight task deduplication — two requests for the same URL share one
+    // extraction task rather than spawning two yt-dlp processes. Requests for different
+    // URLs run fully in parallel, eliminating the previous single-semaphore bottleneck
+    // that caused the spinner to freeze while any other request was in progress.
+    private static readonly ConcurrentDictionary<string, Task<VideoStreamResult>> _inFlightRequests = new();
+
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan LivestreamCacheDuration = TimeSpan.FromMinutes(2);
-    private static readonly SemaphoreSlim _requestLock = new(1, 1);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan SemaphoreTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(5);
 
     private static HybridVideoExtractor _extractor;
-    private static bool _isInitialized = false;
+    private static bool _isInitialized;
 
     /// <summary>
     /// Initialize the video extractor system. Call this during mod load.
@@ -46,7 +49,7 @@ public static class VideoUrlHelper
         }
         else
         {
-            TerraVision.instance.Logger.Info($"Video extraction system ready: {(_extractor as HybridVideoExtractor)?.GetActiveExtractor()}");
+            TerraVision.instance.Logger.Info($"Video extraction system ready: {_extractor.GetActiveExtractor()}");
             TerraVision.instance.Logger.Info($"Livestream support: {(_extractor.SupportsLivestreams ? "ENABLED" : "DISABLED")}");
         }
 
@@ -56,11 +59,9 @@ public static class VideoUrlHelper
     public static bool IsReady => _isInitialized && _extractor != null && _extractor.IsAvailable;
     public static bool SupportsLivestreams => IsReady && _extractor.SupportsLivestreams;
 
-    public static bool IsYouTubePlaylist(string url)
-    {
-        return (url.Contains("youtube.com") || url.Contains("youtu.be")) &&
-               (url.Contains("list=") || url.Contains("/playlist?"));
-    }
+    public static bool IsYouTubePlaylist(string url) =>
+        (url.Contains("youtube.com") || url.Contains("youtu.be")) &&
+        (url.Contains("list=") || url.Contains("/playlist?"));
 
     /// <summary>
     /// Returns true for all YouTube URL forms: standard watch, shorts, music, and youtu.be short links.
@@ -95,10 +96,10 @@ public static class VideoUrlHelper
             if (listIndex == -1)
                 return null;
 
-            string afterList = url.Substring(listIndex + 5);
+            string afterList = url[(listIndex + 5)..];
             int ampersandIndex = afterList.IndexOf('&');
             return ampersandIndex != -1
-                ? afterList.Substring(0, ampersandIndex)
+                ? afterList[..ampersandIndex]
                 : afterList;
         }
         catch (Exception ex)
@@ -371,14 +372,15 @@ public static class VideoUrlHelper
         return totalSeconds * 1000;
     }
 
-    public static async Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
+    public static Task<VideoStreamResult> GetDirectUrlAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!IsReady)
         {
             TerraVision.instance.Logger.Error("Video extraction system not ready");
-            return null;
+            return Task.FromResult<VideoStreamResult>(null);
         }
 
+        // Check cache first — no async needed if the result is already valid
         if (_urlCache.TryGetValue(url, out var cached))
         {
             if (cached.IsLivestream)
@@ -389,7 +391,7 @@ public static class VideoUrlHelper
             else if (IsCachedResultStillValid(cached.Result, cached.Timestamp))
             {
                 TerraVision.instance.Logger.Debug("Using cached URL for regular video");
-                return cached.Result;
+                return Task.FromResult(cached.Result);
             }
             else
             {
@@ -398,25 +400,28 @@ public static class VideoUrlHelper
             }
         }
 
-        bool lockAcquired = false;
+        // If a request for this exact URL is already in flight, return the same task
+        // rather than spawning a second yt-dlp process for the same URL
+        if (_inFlightRequests.TryGetValue(url, out var existingTask))
+        {
+            TerraVision.instance.Logger.Debug($"Joining in-flight request for {url}");
+            return existingTask;
+        }
+
+        var task = FetchAndCacheAsync(url, cancellationToken);
+        _inFlightRequests[url] = task;
+
+        // Remove from in-flight tracking once the task completes regardless of outcome
+        _ = task.ContinueWith(_ => _inFlightRequests.TryRemove(url, out _),
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return task;
+    }
+
+    private static async Task<VideoStreamResult> FetchAndCacheAsync(string url, CancellationToken cancellationToken)
+    {
         try
         {
-            lockAcquired = await _requestLock.WaitAsync(SemaphoreTimeout, cancellationToken);
-            if (!lockAcquired)
-            {
-                TerraVision.instance.Logger.Error("Timed out waiting for request lock");
-                return null;
-            }
-
-            if (_urlCache.TryGetValue(url, out var cachedAfterLock))
-            {
-                if (!cachedAfterLock.IsLivestream && IsCachedResultStillValid(cachedAfterLock.Result, cachedAfterLock.Timestamp))
-                {
-                    TerraVision.instance.Logger.Debug("Using cached URL (populated while waiting for lock)");
-                    return cachedAfterLock.Result;
-                }
-            }
-
             bool isDownload = url.Contains("bilibili.com");
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -424,17 +429,14 @@ public static class VideoUrlHelper
 
             VideoStreamResult streamResult = await _extractor.GetDirectUrlAsync(url, linkedCts.Token);
 
-            if (streamResult != null)
+            if (streamResult != null && !streamResult.IsLivestream)
             {
-                if (!streamResult.IsLivestream)
-                {
-                    _urlCache[url] = (streamResult, DateTime.UtcNow, false);
-                    TerraVision.instance.Logger.Debug("Cached URL for regular video");
-                }
-                else
-                {
-                    TerraVision.instance.Logger.Debug("Livestream URL not cached (expires too quickly)");
-                }
+                _urlCache[url] = (streamResult, DateTime.UtcNow, false);
+                TerraVision.instance.Logger.Debug("Cached URL for regular video");
+            }
+            else if (streamResult?.IsLivestream == true)
+            {
+                TerraVision.instance.Logger.Debug("Livestream URL not cached (expires too quickly)");
             }
 
             return streamResult;
@@ -453,10 +455,6 @@ public static class VideoUrlHelper
         {
             TerraVision.instance.Logger.Error($"URL extraction failed: {ex.Message}");
             return null;
-        }
-        finally
-        {
-            if (lockAcquired) _requestLock.Release();
         }
     }
 
@@ -661,6 +659,9 @@ public class VideoUrlHelperSystem : ModSystem
 
 public class VideoStreamResult
 {
+    public string Title { get; set; }
+    public List<VideoChapter> Chapters { get; set; } = [];
+
     /// <summary>Primary video (or combined) stream URL.</summary>
     public string VideoUrl { get; set; }
 
@@ -709,4 +710,11 @@ public class UrlMetadata
     /// Null if no index was present.
     /// </summary>
     public int? PlaylistIndex { get; set; }
+}
+
+public class VideoChapter
+{
+    public float StartTime { get; set; }  // seconds
+    public float EndTime { get; set; }    // seconds
+    public string Title { get; set; }
 }

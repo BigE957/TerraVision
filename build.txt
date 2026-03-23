@@ -2,4 +2,4 @@ displayName = TerraVision: Video Players
 author = Big E
 version = 1.0.0
 modReferences = Daybreak
-dllReferences = LibVLCSharp, YoutubeDLSharp, YoutubeExplode, AngleSharp, Newtonsoft.Json, Microsoft.Bcl.AsyncInterfaces, System.Text.Json, System.IO.Pipelines, System.Text.Encodings.Web
+dllReferences = LibVLCSharp, YoutubeDLSharp, Newtonsoft.Json, Microsoft.Bcl.AsyncInterfaces, System.Text.Json, System.IO.Pipelines, System.Text.Encodings.Web

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.UI;
 using TerraVision.Core.VideoPlayer;
@@ -78,6 +79,8 @@ public class VideoPlayerUIElement : UIElement, IDisposable
     public bool IsLoading => _playerCore.IsLoading;
     public string CurrentVideoPath => _playerCore.CurrentVideoPath;
     public bool CaptionsEnabled => _playerCore.CaptionsEnabled;
+    public string CurrentTitle => _playerCore.CurrentTitle;
+    public IReadOnlyList<VideoChapter> CurrentChapters => _playerCore.CurrentChapters;
     public float GetPosition() => _playerCore.GetPosition();
     public long GetDuration() => _playerCore.GetDuration();
     public int GetVolume() => _playerCore.GetVolume();

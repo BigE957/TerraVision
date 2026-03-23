@@ -89,6 +89,9 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     private bool _captionFetchInProgress = false;
     private CancellationTokenSource _captionFetchCts = null;
 
+    private string _currentTitle = null;
+    private List<VideoChapter> _currentChapters = [];
+
     #region Events
 
     public event EventHandler PlaybackStarted;
@@ -118,6 +121,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
     public Texture2D CurrentTexture => _videoTexture;
     public int VideoWidth => _videoWidth;
     public int VideoHeight => _videoHeight;
+    public string CurrentTitle => _currentTitle;
+    public IReadOnlyList<VideoChapter> CurrentChapters => _currentChapters;
     public float LoadingRotation => _loadingRotation;
     public Guid SessionId => _sessionId;
 
@@ -403,6 +408,9 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
                         }
 
                         _currentStreamResult = streamResult;
+                        _currentTitle = streamResult.Title;
+                        _currentChapters = streamResult.Chapters ?? [];
+
                         _backupUrls = streamResult.HttpHeaders.TryGetValue("X-Backup-Urls", out string rawBU)
                             ? [.. rawBU.Split('|', StringSplitOptions.RemoveEmptyEntries)]
                             : [];
@@ -918,6 +926,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
             _autoAdvanceQueue = false;
             _videoQueue.Clear();
             _currentlyPlayingUrl = null;
+            _currentTitle = null;
+            _currentChapters = [];
 
             VideoUrlHelper.CancelRequest(_currentRequestId);
             _mediaPlayer?.Stop();

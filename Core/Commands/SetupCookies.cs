@@ -38,7 +38,8 @@ public class SetupCookiesCommand : ModCommand
     private static readonly string[] DefaultSites =
     [
         "bilibili.com",
-        "youtube.com"
+        "youtube.com",
+        "twitch.tv"
     ];
 
     public override void Action(CommandCaller caller, string input, string[] args)

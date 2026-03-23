@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using ReLogic.Content;
 using System;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.GameContent.UI.Elements;
 using Terraria.GameInput;
@@ -40,6 +41,10 @@ public class ExampleVideoPlayerUI : UIState
     private UIText _currentTimeText;
     private UIText _totalTimeText;
 
+    private UIText _titleText;
+    private readonly List<UIRectangle> _chapterTicks = [];
+    private string _hoveredChapterTitle = null;
+
     // Resize handle
     private ResizeHandle _resizeHandle;
 
@@ -52,6 +57,9 @@ public class ExampleVideoPlayerUI : UIState
     private const float MAX_HEIGHT = 1200f;
 
     private bool _isInitialized = false;
+
+    private static readonly Color CaptionsActiveColor = new(63, 82, 151);
+    private static readonly Color CaptionsDimColor = new(30, 40, 75);
 
     public override void OnInitialize()
     {
@@ -137,15 +145,22 @@ public class ExampleVideoPlayerUI : UIState
     {
         _timelinePanel = new UIPanel();
         _timelinePanel.Width.Set(-20, 1f);
-        _timelinePanel.Height.Set(50, 0f);
+        _timelinePanel.Height.Set(60, 0f);
         _timelinePanel.HAlign = 0.5f;
-        _timelinePanel.Top.Set(-130, 1f);
+        _timelinePanel.Top.Set(-132, 1f);
         _timelinePanel.BackgroundColor = new Color(25, 33, 63);
+
+        // Title
+        _titleText = new UIText("", 0.85f);
+        _titleText.HAlign = 0.5f;
+        _titleText.Top.Set(0, 0f);
+        _timelinePanel.Append(_titleText);
 
         // Current time
         _currentTimeText = new UIText("0:00", 0.8f);
         _currentTimeText.Left.Set(10, 0f);
-        _currentTimeText.VAlign = 0.5f;
+        _currentTimeText.Top.Set(0f, 0f);
+        _currentTimeText.VAlign = 0.75f;
         _timelinePanel.Append(_currentTimeText);
 
         // Timeline bar
@@ -153,7 +168,7 @@ public class ExampleVideoPlayerUI : UIState
         _timelineBar.Width.Set(-120, 1f);
         _timelineBar.Height.Set(10, 0f);
         _timelineBar.Left.Set(60, 0f);
-        _timelineBar.VAlign = 0.5f;
+        _timelineBar.VAlign = 0.75f;
         _timelineBar.OnLeftClick += OnTimelineClicked;
         _timelinePanel.Append(_timelineBar);
 
@@ -161,6 +176,7 @@ public class ExampleVideoPlayerUI : UIState
         _timelineProgress = new UIRectangle(Color.Blue);
         _timelineProgress.Width.Set(0, 0f);
         _timelineProgress.Height.Set(0, 1f);
+        _timelineBar.VAlign = 0.75f;
         _timelineBar.Append(_timelineProgress);
 
         // Scrubber
@@ -174,7 +190,7 @@ public class ExampleVideoPlayerUI : UIState
         // Total time
         _totalTimeText = new UIText("0:00", 0.8f);
         _totalTimeText.Left.Set(-50, 1f);
-        _totalTimeText.VAlign = 0.5f;
+        _totalTimeText.VAlign = 0.75f;
         _timelinePanel.Append(_totalTimeText);
     }
 
@@ -227,7 +243,7 @@ public class ExampleVideoPlayerUI : UIState
         _stopButton.OnLeftClick += OnStopClicked;
         _controlPanel.Append(_stopButton);
 
-        _captionsButton = new UITextPanel<string>("CC: On");
+        _captionsButton = new UITextPanel<string>("Captions");
         _captionsButton.Width.Set(buttonWidth, 0f);
         _captionsButton.Height.Set(40, 0f);
         _captionsButton.Left.Set(startX + (buttonWidth + buttonSpacing) * 3, 0f);
@@ -293,9 +309,11 @@ public class ExampleVideoPlayerUI : UIState
 
     private void OnCaptionsClicked(UIMouseEvent evt, UIElement listeningElement)
     {
-        bool newState = !_videoPlayer.CaptionsEnabled;
-        _videoPlayer.SetCaptionsEnabled(newState);
-        _captionsButton.SetText(newState ? "CC: On" : "CC: Off");
+        bool globalEnabled = ModContent.GetInstance<TerraVisionConfig>()?.EnableCaptions ?? true;
+        if (!globalEnabled)
+            return;
+
+        _videoPlayer.SetCaptionsEnabled(!_videoPlayer.CaptionsEnabled);
     }
 
     private void OnCloseClicked(UIMouseEvent evt, UIElement listeningElement)
@@ -323,6 +341,8 @@ public class ExampleVideoPlayerUI : UIState
             _mainPanel.Recalculate();
         }
 
+        _titleText?.SetText(hasVideo ? (_videoPlayer.CurrentTitle ?? "") : "");
+
         // Deactivate text input when clicking outside
         bool urlDeactivated = false;
         if (_urlInput != null && _urlInput._active)
@@ -333,6 +353,40 @@ public class ExampleVideoPlayerUI : UIState
                 urlDeactivated = true;
             }
         }
+
+        // Rebuild chapter ticks when a new video starts
+        // (cheap check — only allocates when chapter count changes)
+        var chapters = _videoPlayer.CurrentChapters;
+        if (chapters.Count != _chapterTicks.Count)
+            RefreshChapterTicks();
+
+        // Chapter hover tooltip
+        _hoveredChapterTitle = null;
+        if (_timelineBar.IsMouseHovering && chapters.Count > 0)
+        {
+            long duration = _videoPlayer.GetDuration();
+            if (duration > 0)
+            {
+                CalculatedStyle dims = _timelineBar.GetDimensions();
+                float relX = Main.mouseX - dims.X;
+                float hoverPct = Math.Clamp(relX / dims.Width, 0f, 1f);
+                float hoverSec = hoverPct * (duration / 1000f);
+
+                // Find the chapter that contains the hovered position
+                for (int i = chapters.Count - 1; i >= 0; i--)
+                {
+                    if (hoverSec >= chapters[i].StartTime)
+                    {
+                        _hoveredChapterTitle = chapters[i].Title;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Draw chapter tooltip as mouse text if hovering
+        if (_hoveredChapterTitle != null)
+            Main.instance.MouseText(_hoveredChapterTitle);
 
         // Update timeline
         if (_videoPlayer != null && (_videoPlayer.IsPlaying || _videoPlayer.IsPaused))
@@ -355,9 +409,51 @@ public class ExampleVideoPlayerUI : UIState
             _totalTimeText.SetText(FormatTime(duration));
         }
 
+        _titleText?.SetText(hasVideo ? (_videoPlayer.CurrentTitle ?? "") : "");
+
+        if (_captionsButton != null)
+        {
+            bool globalEnabled = ModContent.GetInstance<TerraVisionConfig>()?.EnableCaptions ?? true;
+            bool localEnabled = _videoPlayer.CaptionsEnabled;
+            _captionsButton.BackgroundColor = (globalEnabled && localEnabled) ? CaptionsActiveColor : CaptionsDimColor;
+        }
+
         // ESC to close (only if text input is not active)
         if (Main.keyState.IsKeyDown(Keys.Escape) && !Main.oldKeyState.IsKeyDown(Keys.Escape) && (_urlInput == null || !urlDeactivated))
             ModContent.GetInstance<ExampleVideoUISystem>().HideUI();
+    }
+
+    private void RefreshChapterTicks()
+    {
+        foreach (var tick in _chapterTicks)
+            _timelineBar.RemoveChild(tick);
+        _chapterTicks.Clear();
+
+        var chapters = _videoPlayer.CurrentChapters;
+        long duration = _videoPlayer.GetDuration();
+        if (chapters == null || chapters.Count == 0)
+            return;
+
+        // Duration may not be available yet — defer until it is
+        if (duration <= 0)
+            return;
+
+        float durationSec = duration / 1000f;
+
+        foreach (var chapter in chapters)
+        {
+            float pct = chapter.StartTime / durationSec;
+
+            var tick = new UIRectangle(Color.White);
+            tick.Width.Set(2, 0f);
+            tick.Height.Set(0, 1f);
+            tick.Left.Set(0, pct);
+            tick.IgnoresMouseInteraction = true;
+            _timelineBar.Append(tick);
+            _chapterTicks.Add(tick);
+        }
+
+        _timelineBar.Recalculate();
     }
 
     private static string FormatTime(long milliseconds)

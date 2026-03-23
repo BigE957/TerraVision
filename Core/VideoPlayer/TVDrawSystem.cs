@@ -1,5 +1,4 @@
-﻿using AngleSharp.Dom;
-using Daybreak.Common.Rendering;
+﻿using Daybreak.Common.Rendering;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
