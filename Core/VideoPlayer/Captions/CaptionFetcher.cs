@@ -445,19 +445,26 @@ public static partial class CaptionFetcher
         return null;
     }
 
-    private static string GetLanguageCode() => Language.ActiveCulture.Name switch
+    private static string GetLanguageCode()
     {
-        "zh-Hans" => "zh-Hans,zh,zh-CN",
-        "zh-Hant" => "zh-Hant,zh,zh-TW",
-        "de" => "de",
-        "it" => "it",
-        "fr" => "fr",
-        "es" => "es",
-        "ru" => "ru",
-        "pt-BR" => "pt-BR,pt",
-        "pl" => "pl",
-        _ => "en"
-    };
+        string configCode = ModContent.GetInstance<TerraVisionConfig>()?.CaptionLanguageCode();
+        if (configCode != null)
+            return configCode;
+
+        return Language.ActiveCulture.Name switch
+        {
+            "zh-Hans" => "zh-Hans,zh,zh-CN",
+            "zh-Hant" => "zh-Hant,zh,zh-TW",
+            "de" => "de",
+            "it" => "it",
+            "fr" => "fr",
+            "es" => "es",
+            "ru" => "ru",
+            "pt-BR" => "pt-BR,pt",
+            "pl" => "pl",
+            _ => "en"
+        };
+    }
 
     private static string GetTempDir()
     {

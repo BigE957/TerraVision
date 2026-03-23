@@ -112,14 +112,37 @@ Configs: {
 			Label: Video Quality
 			Tooltip:
 				'''
-				Sets a preferred/maximum allowed video quality to be used for video requests.
-				Auto will simply get the highest quality available.
+				Maximum video resolution to request. Lower values reduce bandwidth usage and load times.
+				Auto selects the best available quality.
 				'''
+		}
+
+		DefaultVolume: {
+			Label: Default Volume
+			Tooltip: Default volume for newly placed TV tiles (0–100). Existing TVs are not affected.
 		}
 
 		EnableCaptions: {
 			Label: Enable Captions
-			Tooltip: Globally disables captions, stopping them from even being loaded.
+			Tooltip: Globally enable or disable caption fetching. When disabled, no caption data is downloaded.
+		}
+
+		CaptionLanguage: {
+			Label: Prefered Caption Language
+			Tooltip: 
+				'''
+				Prefered language to use for captions. Auto follows the game language.
+				Override this if you want captions in a different language than your game language.
+				'''
+		}
+
+		ShowLoadingMessages: {
+			Label: Show Loading Messages
+			Tooltip: 
+				'''
+				Show status messages in chat when loading or searching for videos.
+				Error messages are always shown regardless of this setting.
+				'''
 		}
 	}
 

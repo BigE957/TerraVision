@@ -59,9 +59,7 @@ public static class VideoUrlHelper
     public static bool IsReady => _isInitialized && _extractor != null && _extractor.IsAvailable;
     public static bool SupportsLivestreams => IsReady && _extractor.SupportsLivestreams;
 
-    public static bool IsYouTubePlaylist(string url) =>
-        (url.Contains("youtube.com") || url.Contains("youtu.be")) &&
-        (url.Contains("list=") || url.Contains("/playlist?"));
+    public static bool IsYouTubePlaylist(string url) => (url.Contains("youtube.com") || url.Contains("youtu.be")) && (url.Contains("list=") || url.Contains("/playlist?"));
 
     /// <summary>
     /// Returns true for all YouTube URL forms: standard watch, shorts, music, and youtu.be short links.
@@ -98,9 +96,7 @@ public static class VideoUrlHelper
 
             string afterList = url[(listIndex + 5)..];
             int ampersandIndex = afterList.IndexOf('&');
-            return ampersandIndex != -1
-                ? afterList[..ampersandIndex]
-                : afterList;
+            return ampersandIndex != -1 ? afterList[..ampersandIndex] : afterList;
         }
         catch (Exception ex)
         {
@@ -546,10 +542,7 @@ public static class VideoUrlHelper
             else if (url.Contains("reddit.com")) platform = "Reddit";
             else if (url.Contains("bilibili.com")) platform = "Bilibili";
 
-            if (platform == "Bilibili")
-                Main.NewText("Downloading Bilibili video...", Color.LightBlue);
-            else
-                Main.NewText($"Extracting {platform} stream URL...", Color.LightBlue);
+            ShowStatus($"Extracting {platform} stream URL...", Color.LightBlue);
 
             var cts = new CancellationTokenSource();
             _activeRequests[requestId] = cts;
@@ -584,7 +577,7 @@ public static class VideoUrlHelper
 
     public static void ProcessSearchAsync(string searchQuery, Action<VideoStreamResult> onComplete, Guid requestId, int resultIndex = 0, int maxResults = 10)
     {
-        Main.NewText("Searching YouTube...", Color.LightBlue);
+        ShowStatus("Searching YouTube...", Color.LightBlue);
 
         var cts = new CancellationTokenSource();
         _activeRequests[requestId] = cts;
@@ -605,7 +598,7 @@ public static class VideoUrlHelper
                     return;
                 }
 
-                Main.QueueMainThreadAction(() => Main.NewText("Found video, extracting stream...", Color.LightGreen));
+                Main.QueueMainThreadAction(() => ShowStatus("Found video, extracting stream...", Color.LightGreen));
 
                 VideoStreamResult result = await GetDirectUrlAsync(videoUrl, cts.Token);
                 _activeRequests.TryRemove(requestId, out _);
@@ -632,6 +625,12 @@ public static class VideoUrlHelper
             cts.Cancel();
             cts.Dispose();
         }
+    }
+
+    private static void ShowStatus(string message, Color color)
+    {
+        if (ModContent.GetInstance<TerraVisionConfig>()?.ShowLoadingMessages ?? true)
+            Main.NewText(message, color);
     }
 }
 

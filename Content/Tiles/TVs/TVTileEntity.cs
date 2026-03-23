@@ -90,6 +90,7 @@ public class TVTileEntity : ModTileEntity
     {
         TilePosition = new Point16(i, j);
         Size = ((BaseTVTile)TileLoader.GetTile(type)).GetTVDimensions();
+        Volume = ModContent.GetInstance<TerraVisionConfig>()?.DefaultVolume ?? 100;
 
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
