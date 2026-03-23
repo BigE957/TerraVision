@@ -173,7 +173,7 @@ public class BilibiliExtractor
 
     private static string ExtractKeyFromUrl(string url)
     {
-        // e.g. https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077d.png → 7cd084941338484aae1ad9425b84077d
+        // e.g. https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077d.png -> 7cd084941338484aae1ad9425b84077d
         int slash = url.LastIndexOf('/');
         int dot = url.LastIndexOf('.');
         if (slash < 0 || dot < 0 || dot <= slash)

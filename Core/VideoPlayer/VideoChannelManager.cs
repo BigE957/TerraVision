@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
+using Terraria.ID;
 using Terraria.ModLoader;
 
 namespace TerraVision.Core.VideoPlayer;
@@ -198,6 +199,13 @@ public class VideoChannelManager : ModSystem
     // Track if special override channel is currently active
     private bool _isOverrideChannelActive = false;
     private SpecialEventVideo _currentSpecialEvent = null;
+
+    #region Events
+    public event Action<int, string> OnChannelPlay;
+    public event Action<int> OnChannelPause;
+    public event Action<int> OnChannelResume;
+    public event Action<int> OnChannelStop;
+    #endregion
 
     #region Initialization
 
@@ -458,6 +466,7 @@ public class VideoChannelManager : ModSystem
                     if (channelPlayer.IsPlaying)
                     {
                         channelPlayer.Pause();
+                        OnChannelPause.Invoke(kvp.Key);
                         pausedCount++;
                     }
                 }
@@ -507,6 +516,7 @@ public class VideoChannelManager : ModSystem
             if (channelPlayer.IsPaused)
             {
                 channelPlayer.Resume();
+                OnChannelResume.Invoke(kvp.Key);
                 resumedCount++;
             }
         }
@@ -568,7 +578,13 @@ public class VideoChannelManager : ModSystem
             _lastPlayedEntry[channelId] = entry;
         }
 
-        PlayEntry(entry, player, channelContent.IsPlaylist);
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+            TVSyncSystem.RequestPlay(channelId, entry.Query);
+        else
+        {
+            PlayEntry(entry, player, channelContent.IsPlaylist);
+            OnChannelPlay?.Invoke(channelId, entry.Query);
+        }
     }
 
     /// <summary>
@@ -663,14 +679,8 @@ public class VideoChannelManager : ModSystem
         int activeTVCount = 0;
 
         foreach (var kvp in Terraria.DataStructures.TileEntity.ByID)
-        {
-            if (kvp.Value is Content.Tiles.TVs.TVTileEntity tvEntity &&
-                tvEntity.CurrentChannel == channelId &&
-                tvEntity.IsOn)
-            {
+            if (kvp.Value is Content.Tiles.TVs.TVTileEntity tvEntity && tvEntity.CurrentChannel == channelId && tvEntity.IsOn)
                 activeTVCount++;
-            }
-        }
 
         if (activeTVCount == 0)
         {
@@ -688,6 +698,7 @@ public class VideoChannelManager : ModSystem
                 else if (player.IsPlaying || player.IsLoading)
                 {
                     player.Stop();
+                    OnChannelStop.Invoke(channelId);
                     TerraVision.instance.Logger.Info($"Stopped unused channel {channelId}");
                 }
             }

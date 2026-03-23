@@ -225,7 +225,7 @@ public class SetupCookiesCommand : ModCommand
                     File.Copy(tempCopy, destPath, overwrite: true);
                     saved++;
                     TerraVision.instance.Logger.Info(
-                        $"[SetupCookies] Saved {browser} cookies for {site} → {destPath}");
+                        $"[SetupCookies] Saved {browser} cookies for {site} -> {destPath}");
                 }
 
                 string siteList = string.Join(", ", sitesToSave);

@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Terraria;
 using Terraria.ModLoader;
+using TerraVision.Core;
 using TerraVision.Core.VideoPlayer;
 
 namespace TerraVision;
@@ -23,6 +24,67 @@ public class TerraVision : Mod
 
         if (!Main.dedServ)
             SetupLibVLC();
+    }
+
+    private static void SetupLibVLC()
+    {
+        if (_coreInitialized)
+            return;
+
+        string vlcPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                                      "My Games", "Terraria", "tModLoader", "VideoPlayerLibs");
+        try
+        {
+            LibVLCSharp.Shared.Core.Initialize(vlcPath);
+            _coreInitialized = true;
+
+            string[] args =
+            [
+                "--no-quiet",
+                "--network-caching=1000",
+                "--file-caching=1000",
+                "--avcodec-fast",
+                "--aout=directsound,waveout,mmdevice",
+            ];
+
+            LibVLCInstance = new LibVLC(args);
+
+            // Correct way to get VLC logs — event subscription, not constructor args
+            LibVLCInstance.Log += (sender, e) =>
+            {
+                // Only capture warnings and errors to avoid spam
+                if (e.Level >= LogLevel.Warning)
+                    instance.Logger.Debug($"[VLC/{e.Level}] ({e.Module}) {e.Message}");
+            };
+
+            instance.Logger.Info("LibVLC initialized successfully!");
+            instance.Logger.Info($"LibVLC version: {LibVLCInstance.Version}");
+            LogAudioCapabilities();
+        }
+        catch (Exception ex)
+        {
+            instance.Logger.Error($"Failed to initialize LibVLC: {ex.Message}");
+            instance.Logger.Error($"Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    private static void LogAudioCapabilities()
+    {
+        try
+        {
+            var audioOutputs = LibVLCInstance.AudioOutputs;
+            instance.Logger.Info($"Available audio outputs: {audioOutputs.Length}");
+
+            foreach (var output in audioOutputs)
+            {
+                instance.Logger.Info($"  - {output.Name}");
+                instance.Logger.Info($"    Description: {output.Description}");
+            }
+        }
+        catch (Exception ex)
+        {
+            instance.Logger.Warn($"Could not log audio capabilities: {ex.Message}");
+        }
     }
 
     public override void Unload()
@@ -42,6 +104,11 @@ public class TerraVision : Mod
         }
 
         instance = null;
+    }
+
+    public override void HandlePacket(BinaryReader reader, int whoAmI)
+    {
+        ModContent.GetInstance<TVSyncSystem>()?.HandlePacket(reader, whoAmI);
     }
 
     /// <summary>
@@ -309,67 +376,6 @@ public class TerraVision : Mod
         {
             Logger.Error($"[ModCall] '{command}' threw an exception: {ex.Message}");
             return false;
-        }
-    }
-
-    private static void SetupLibVLC()
-    {
-        if (_coreInitialized)
-            return;
-
-        string vlcPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                                      "My Games", "Terraria", "tModLoader", "VideoPlayerLibs");
-        try
-        {
-            LibVLCSharp.Shared.Core.Initialize(vlcPath);
-            _coreInitialized = true;
-
-            string[] args =
-            [
-                "--no-quiet",
-                "--network-caching=1000",
-                "--file-caching=1000",
-                "--avcodec-fast",
-                "--aout=directsound,waveout,mmdevice",
-            ];
-
-            LibVLCInstance = new LibVLC(args);
-
-            // Correct way to get VLC logs — event subscription, not constructor args
-            LibVLCInstance.Log += (sender, e) =>
-            {
-                // Only capture warnings and errors to avoid spam
-                if (e.Level >= LogLevel.Warning)
-                    instance.Logger.Debug($"[VLC/{e.Level}] ({e.Module}) {e.Message}");
-            };
-
-            instance.Logger.Info("LibVLC initialized successfully!");
-            instance.Logger.Info($"LibVLC version: {LibVLCInstance.Version}");
-            LogAudioCapabilities();
-        }
-        catch (Exception ex)
-        {
-            instance.Logger.Error($"Failed to initialize LibVLC: {ex.Message}");
-            instance.Logger.Error($"Stack trace: {ex.StackTrace}");
-        }
-    }
-
-    private static void LogAudioCapabilities()
-    {
-        try
-        {
-            var audioOutputs = LibVLCInstance.AudioOutputs;
-            instance.Logger.Info($"Available audio outputs: {audioOutputs.Length}");
-
-            foreach (var output in audioOutputs)
-            {
-                instance.Logger.Info($"  - {output.Name}");
-                instance.Logger.Info($"    Description: {output.Description}");
-            }
-        }
-        catch (Exception ex)
-        {
-            instance.Logger.Warn($"Could not log audio capabilities: {ex.Message}");
         }
     }
 }

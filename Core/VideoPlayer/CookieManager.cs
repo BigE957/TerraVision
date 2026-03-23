@@ -30,7 +30,7 @@ public static class CookieManager
 
     /// <summary>
     /// Returns the path where cookies for a given domain should be stored.
-    /// e.g. GetSavedCookiesPath("bilibili.com") → .../cookies/bilibili.com.txt
+    /// e.g. GetSavedCookiesPath("bilibili.com") -> .../cookies/bilibili.com.txt
     /// </summary>
     public static string GetSavedCookiesPath(string domain) => Path.Combine(CookiesFolderPath, $"{domain}.txt");
 
@@ -226,7 +226,7 @@ public static class CookieManager
     }
 
     /// <summary>
-    /// Returns the apex (two-label) domain: "video.bilibili.com" → "bilibili.com".
+    /// Returns the apex (two-label) domain: "video.bilibili.com" -> "bilibili.com".
     /// Used as a fallback filename if the full host file doesn't exist.
     /// </summary>
     private static string ApexDomain(string domain)
