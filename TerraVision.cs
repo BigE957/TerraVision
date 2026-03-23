@@ -108,7 +108,7 @@ public class TerraVision : Mod
 
     public override void HandlePacket(BinaryReader reader, int whoAmI)
     {
-        ModContent.GetInstance<TVSyncSystem>()?.HandlePacket(reader, whoAmI);
+        ModContent.GetInstance<MultiplayerSyncSystem>()?.HandlePacket(reader, whoAmI);
     }
 
     /// <summary>

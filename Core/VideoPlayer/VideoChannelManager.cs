@@ -579,7 +579,7 @@ public class VideoChannelManager : ModSystem
         }
 
         if (Main.netMode == NetmodeID.MultiplayerClient)
-            TVSyncSystem.RequestPlay(channelId, entry.Query);
+            MultiplayerSyncSystem.RequestPlay(channelId, entry.Query);
         else
         {
             PlayEntry(entry, player, channelContent.IsPlaylist);

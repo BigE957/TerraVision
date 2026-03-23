@@ -46,7 +46,7 @@ namespace TerraVision.Core;
 ///   5  — PauseResume    server -> all clients
 ///   6  — StopChannel    server -> all clients
 /// </summary>
-public class TVSyncSystem : ModSystem
+public class MultiplayerSyncSystem : ModSystem
 {
     public const byte PKT_PLAY_REQUEST = 0;
     public const byte PKT_LOAD_VIDEO = 1;
