@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
 using Terraria;
+using Terraria.ModLoader;
 using Terraria.UI;
 using TerraVision.Core.VideoPlayer;
 
@@ -39,12 +40,14 @@ public class VideoPlayerUIElement : UIElement, IDisposable
 
     private void OnPlaybackStarted(object sender, EventArgs e)
     {
-        Main.NewText("Playback started", Color.LightGreen);
+        if (ModContent.GetInstance<TerraVisionConfig>()?.ShowLoadingMessages ?? true)
+            Main.NewText("Playback started", Color.LightGreen);
     }
 
     private void OnPlaybackStopped(object sender, EventArgs e)
     {
-        Main.NewText("Playback stopped", Color.Gray);
+        if (ModContent.GetInstance<TerraVisionConfig>()?.ShowLoadingMessages ?? true)
+            Main.NewText("Playback stopped", Color.Gray);
     }
 
     private void OnPlaybackError(object sender, EventArgs e)

@@ -129,7 +129,7 @@ Configs: {
 
 		CaptionLanguage: {
 			Label: Prefered Caption Language
-			Tooltip: 
+			Tooltip:
 				'''
 				Prefered language to use for captions. Auto follows the game language.
 				Override this if you want captions in a different language than your game language.
@@ -138,7 +138,7 @@ Configs: {
 
 		ShowLoadingMessages: {
 			Label: Show Loading Messages
-			Tooltip: 
+			Tooltip:
 				'''
 				Show status messages in chat when loading or searching for videos.
 				Error messages are always shown regardless of this setting.
@@ -225,6 +225,70 @@ Configs: {
 
 		Q2160p: {
 			Label: 2160p
+			Tooltip: ""
+		}
+	}
+
+	SubtitleLanguage: {
+		Tooltip: ""
+
+		Auto: {
+			Label: Auto
+			Tooltip: ""
+		}
+
+		English: {
+			Label: English
+			Tooltip: ""
+		}
+
+		Chinese: {
+			Label: Chinese
+			Tooltip: ""
+		}
+
+		German: {
+			Label: German
+			Tooltip: ""
+		}
+
+		French: {
+			Label: French
+			Tooltip: ""
+		}
+
+		Spanish: {
+			Label: Spanish
+			Tooltip: ""
+		}
+
+		Italian: {
+			Label: Italian
+			Tooltip: ""
+		}
+
+		Russian: {
+			Label: Russian
+			Tooltip: ""
+		}
+
+		PortugueseBrazil: {
+			Label: Portuguese Brazil
+			Tooltip: ""
+		}
+
+		Polish: {
+			Label: Polish
+			Tooltip: ""
+		}
+
+		Japanese: {
+			Label: Japanese
+			Tooltip: ""
+		}
+
+		Korean: {
+			Label: Korean
 			Tooltip: ""
 		}
 	}
