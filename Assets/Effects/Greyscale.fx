@@ -2,11 +2,16 @@ sampler TextureSampler : register(s0);
 
 float Intensity = 1.0;
 
-float4 PixelShaderFunction(float2 coords : TEXCOORD0) : COLOR0
+// Add the vertex color parameter
+float4 PixelShaderFunction(float2 coords : TEXCOORD0, float4 vertexColor : COLOR0) : COLOR0
 {
-    float4 color = tex2D(TextureSampler, coords);
+    // Sample the texture
+    float4 textureColor = tex2D(TextureSampler, coords);
     
-    // These weights account for human eye sensitivity to different colors
+    // Multiply texture color by vertex color (this is what SpriteBatch normally does)
+    float4 color = textureColor * vertexColor;
+    
+    // Now apply greyscale to the combined color
     float grey = dot(color.rgb, float3(0.299, 0.587, 0.114));
     float3 greyColor = float3(grey, grey, grey);
     float3 finalColor = lerp(color.rgb, greyColor, Intensity);
