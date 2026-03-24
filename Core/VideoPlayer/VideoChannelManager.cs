@@ -200,6 +200,9 @@ public class VideoChannelManager : ModSystem
     private bool _isOverrideChannelActive = false;
     private SpecialEventVideo _currentSpecialEvent = null;
 
+    private static readonly HashSet<int> _playlistFetchInProgress = [];
+    private static readonly Dictionary<int, DateTime> _playlistFetchCooldown = [];
+
     #region Events
     public event Action<int, string> OnChannelPlay;
     public event Action<int> OnChannelPause;
@@ -377,15 +380,13 @@ public class VideoChannelManager : ModSystem
     /// </summary>
     public void StartChannel(int channelId)
     {
-        if (!IsPresetChannel(channelId))
-        {
-            TerraVision.instance.Logger.Error($"Channel {channelId} is not a preset channel");
-            return;
-        }
+        if (!IsPresetChannel(channelId)) return;
 
         var player = GetChannelPlayer(channelId);
-
         if (player != null && (player.IsPlaying || player.IsLoading || player.IsPreparing))
+            return;
+
+        if (_playlistFetchInProgress.Contains(channelId))
             return;
 
         player = GetOrCreateChannelPlayer(channelId);
@@ -516,7 +517,7 @@ public class VideoChannelManager : ModSystem
             if (channelPlayer.IsPaused)
             {
                 channelPlayer.Resume();
-                OnChannelResume.Invoke(kvp.Key);
+                OnChannelResume?.Invoke(kvp.Key);
                 resumedCount++;
             }
         }
@@ -582,7 +583,7 @@ public class VideoChannelManager : ModSystem
             MultiplayerSyncSystem.RequestPlay(channelId, entry.Query);
         else
         {
-            PlayEntry(entry, player, channelContent.IsPlaylist);
+            PlayEntry(entry, player, channelContent.IsPlaylist, channelId);
             OnChannelPlay?.Invoke(channelId, entry.Query);
         }
     }
@@ -590,14 +591,14 @@ public class VideoChannelManager : ModSystem
     /// <summary>
     /// Play a content entry.
     /// </summary>
-    private static void PlayEntry(ContentEntry entry, VideoPlayerCore player, bool isPlaylist)
+    private void PlayEntry(ContentEntry entry, VideoPlayerCore player, bool isPlaylist, int channelID)
     {
         string query = entry.Query;
 
         player.SetCaptionsEnabled(entry.ShowCaptions);
 
         if (isPlaylist)
-            PlayPlaylist(query, entry, player);
+            PlayPlaylist(query, entry, player, channelID);
         else if (VideoPlayerCore.IsFilePath(query) || VideoUrlHelper.IsSupportedVideoUrl(query) || VideoPlayerCore.IsMediaLink(query))
             player.Play(query, forcePlay: true);
         else
@@ -607,20 +608,22 @@ public class VideoChannelManager : ModSystem
     /// <summary>
     /// Play a YouTube playlist.
     /// </summary>
-    private static void PlayPlaylist(string playlistUrl, ContentEntry entry, VideoPlayerCore player)
+    private void PlayPlaylist(string playlistUrl, ContentEntry entry, VideoPlayerCore player, int channelId)
     {
-        string playlistId = VideoUrlHelper.ExtractPlaylistId(playlistUrl);
-        if (string.IsNullOrEmpty(playlistId))
-        {
-            TerraVision.instance.Logger.Error("Failed to extract playlist ID");
+        if (_playlistFetchInProgress.Contains(channelId))
             return;
-        }
+
+        if (_playlistFetchCooldown.TryGetValue(channelId, out var retryAfter) && DateTime.UtcNow < retryAfter)
+            return;
+
+        _playlistFetchInProgress.Add(channelId);
 
         Task.Run(async () =>
         {
             try
             {
                 var cts = new CancellationTokenSource();
+                string playlistId = VideoUrlHelper.ExtractPlaylistId(playlistUrl) ?? throw (new Exception("Failed to extract playlistID"));
                 List<string> videoUrls = await VideoUrlHelper.GetPlaylistVideosAsync(playlistId, cts.Token);
 
                 Main.QueueMainThreadAction(() =>
@@ -628,6 +631,7 @@ public class VideoChannelManager : ModSystem
                     if (videoUrls.Count == 0)
                     {
                         TerraVision.instance.Logger.Error("No videos found in playlist");
+                        _playlistFetchCooldown[channelId] = DateTime.UtcNow.AddSeconds(60);
                         return;
                     }
 
@@ -648,6 +652,16 @@ public class VideoChannelManager : ModSystem
             catch (Exception ex)
             {
                 TerraVision.instance.Logger.Error($"Playlist loading failed: {ex.Message}");
+                Main.QueueMainThreadAction(() =>
+                {
+                    _playlistFetchCooldown[channelId] = DateTime.UtcNow.AddSeconds(60);
+                    _playlistFetchInProgress.Remove(channelId);
+                    player.CancelLoading();
+                });
+            }
+            finally
+            {
+                Main.QueueMainThreadAction(() => _playlistFetchInProgress.Remove(channelId));
             }
         });
     }
@@ -698,7 +712,7 @@ public class VideoChannelManager : ModSystem
                 else if (player.IsPlaying || player.IsLoading)
                 {
                     player.Stop();
-                    OnChannelStop.Invoke(channelId);
+                    OnChannelStop?.Invoke(channelId);
                     TerraVision.instance.Logger.Info($"Stopped unused channel {channelId}");
                 }
             }
@@ -753,6 +767,7 @@ public class VideoChannelManager : ModSystem
 
         _channelPlayers.Clear();
         _lastPlayedEntry.Clear();
+        _playlistFetchInProgress.Clear();
         _isOverrideChannelActive = false;
         _currentSpecialEvent = null;
 

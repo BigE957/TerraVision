@@ -1119,6 +1119,12 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         }
     }
 
+    public void CancelLoading()
+    {
+        _isPreparing = false;
+        SetLoadingState(false);
+    }
+
     #endregion
 
     #region Update and Texture Management
@@ -1217,7 +1223,8 @@ public class VideoPlayerCore(int videoWidth = 1280, int videoHeight = 720) : IDi
         {
             try
             {
-                // Maintain aspect ratio within the target area               
+                // Maintain aspect ratio within the target area
+                spriteBatch.Draw(pixel, targetRect, Color.Black * opacity);
                 spriteBatch.Draw(_videoTexture, videoRect, Color.White * opacity);
             }
             catch (Exception ex)

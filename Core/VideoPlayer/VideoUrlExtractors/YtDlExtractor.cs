@@ -749,49 +749,38 @@ public class YtDlExtractor : IVideoUrlExtractor
 
         try
         {
-            // Use yt-dlp to search YouTube
-            var options = new OptionSet()
+            // Use yt-dlp to search YouTube with direct process call
+            string searchUrl = $"ytsearch{maxResults}:{searchQuery}";
+            string args = $"--flat-playlist --get-id --quiet --no-warnings --no-playlist -- \"{searchUrl}\"";
+
+            string output = await RunRawProcessAsync(_ytdlpPath, args, cancellationToken);
+
+            // Parse the output to get video IDs
+            List<string> videoIds = [];
+            foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                FlatPlaylist = true,
-                SkipDownload = true
-            };
-            options.AddCustomOption("--get-id", "");
+                string id = line.Trim();
+                if (!string.IsNullOrEmpty(id))
+                    videoIds.Add(id);
+            }
 
-            // Search and get video IDs
-            var result = await _ytdl.RunVideoPlaylistDownload($"ytsearch{maxResults}:{searchQuery}", ct: cancellationToken, overrideOptions: options);
-
-            if (!result.Success || result.Data == null || result.Data.Length == 0)
+            if (videoIds.Count == 0)
             {
                 TerraVision.instance.Logger.Warn("yt-dlp search returned no results");
                 return null;
             }
 
-            var videoResults = result.Data;
-
             // Select based on index
             int selectedIndex;
             if (resultIndex == -1)
-                selectedIndex = Main.rand.Next(videoResults.Length);
-            else if (resultIndex >= videoResults.Length)
-                selectedIndex = videoResults.Length - 1;
+                selectedIndex = Main.rand.Next(videoIds.Count);
+            else if (resultIndex >= videoIds.Count)
+                selectedIndex = videoIds.Count - 1;
             else
                 selectedIndex = resultIndex;
-            
-            string videoIdOrUrl = videoResults[selectedIndex];
 
-            // Check if it's already a full URL or just an ID
-            string videoUrl;
-            if (videoIdOrUrl.StartsWith("http"))
-            {
-                // It's already a URL, extract the ID
-                var match = Regex.Match(videoIdOrUrl, @"[?&]v=([^&]+)");
-                if (match.Success)
-                    videoUrl = $"https://youtube.com/watch?v={match.Groups[1].Value}";
-                else
-                    videoUrl = videoIdOrUrl; // Use as-is
-            }
-            else // It's just an ID
-                videoUrl = $"https://youtube.com/watch?v={videoIdOrUrl}";
+            string videoId = videoIds[selectedIndex];
+            string videoUrl = $"https://youtube.com/watch?v={videoId}";
 
             TerraVision.instance.Logger.Info($"yt-dlp search found video: {videoUrl}");
             return videoUrl;
@@ -819,46 +808,23 @@ public class YtDlExtractor : IVideoUrlExtractor
         try
         {
             string playlistUrl = $"https://youtube.com/playlist?list={playlistId}";
+            string args = $"--flat-playlist --get-id --quiet --no-warnings --no-playlist -- \"{playlistUrl}\"";
 
-            var options = new OptionSet()
-            {
-                FlatPlaylist = true,
-                SkipDownload = true
-            };
-            options.AddCustomOption("--get-id", "");
-
-            var result = await _ytdl.RunVideoPlaylistDownload(
-                playlistUrl,
-                ct: cancellationToken,
-                overrideOptions: options
-            );
-
-            if (!result.Success || result.Data == null || result.Data.Length == 0)
-            {
-                TerraVision.instance.Logger.Warn("yt-dlp playlist fetch returned no results");
-                return [];
-            }
+            string output = await RunRawProcessAsync(_ytdlpPath, args, cancellationToken);
 
             List<string> videoUrls = [];
-            foreach (var item in result.Data)
+            foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                string videoUrl;
-                if (item.StartsWith("http"))
-                {
-                    // Already a URL, extract ID and normalize
-                    var match = Regex.Match(item, @"[?&]v=([^&]+)");
-                    if (match.Success)
-                        videoUrl = $"https://youtube.com/watch?v={match.Groups[1].Value}";
-                    else
-                        videoUrl = item;
-                }
-                else // Just an ID
-                    videoUrl = $"https://youtube.com/watch?v={item}";
-
-                videoUrls.Add(videoUrl);
+                string id = line.Trim();
+                if (!string.IsNullOrEmpty(id))
+                    videoUrls.Add($"https://youtube.com/watch?v={id}");
             }
 
-            TerraVision.instance.Logger.Info($"yt-dlp extracted {videoUrls.Count} videos from playlist");
+            if (videoUrls.Count == 0)
+                TerraVision.instance.Logger.Warn("yt-dlp playlist fetch returned no results");
+            else
+                TerraVision.instance.Logger.Info($"yt-dlp extracted {videoUrls.Count} videos from playlist");
+
             return videoUrls;
         }
         catch (OperationCanceledException)
