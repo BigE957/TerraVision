@@ -13,7 +13,7 @@ using Terraria.ObjectData;
 
 namespace TerraVision.Content.Tiles.TVs;
 
-public class CassettePlayer : BaseMediaPlayerTile
+public class VHSPlayer : BaseMediaPlayerTile
 {
     public override void SetStaticDefaults()
     {
@@ -51,7 +51,7 @@ public class CassettePlayer : BaseMediaPlayerTile
     }
 }
 
-public class CassettePlayerItem : ModItem
+public class VHSPlayerItem : ModItem
 {
     public override void SetStaticDefaults()
     {
@@ -71,6 +71,6 @@ public class CassettePlayerItem : ModItem
         Item.consumable = true;
         Item.value = Item.buyPrice(1, 0, 0, 0);
         Item.rare = ItemRarityID.Green;
-        Item.createTile = ModContent.TileType<CassettePlayer>();
+        Item.createTile = ModContent.TileType<VHSPlayer>();
     }
 }

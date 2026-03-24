@@ -1,9 +1,9 @@
 Tiles: {
 	BoxTV.MapEntry: Box TV
-	CassettePlayer.MapEntry: Cassette Player
 	FlatscreenTVTile.MapEntry: Flatscreen TV
 	StreamingPlayer.MapEntry: Streaming Player
 	TennaVision.MapEntry: Tenna Vision
+	VHSPlayer.MapEntry: VHS Player
 }
 
 Items: {
@@ -22,11 +22,6 @@ Items: {
 		Tooltip: ""
 	}
 
-	CassettePlayerItem: {
-		DisplayName: Cassette Player
-		Tooltip: ""
-	}
-
 	FlatscreenTVItem: {
 		DisplayName: Flatscreen TV
 		Tooltip: ""
@@ -37,14 +32,14 @@ Items: {
 		Tooltip: ""
 	}
 
-	Cassettes: {
-		PortedHimCassette: {
-			DisplayName: Ported Him Cassette
+	Tapes: {
+		PortedHimTape: {
+			DisplayName: VHS Tape (Ported Him)
 			Tooltip: ""
 		}
 
-		HubrisCassette: {
-			DisplayName: Hubris Cassette
+		HubrisTape: {
+			DisplayName: VHS Tape (Hubris)
 			Tooltip: ""
 		}
 	}
@@ -60,7 +55,12 @@ Items: {
 	}
 
 	TVMonolithItem: {
-		DisplayName: T V Monolith Item
+		DisplayName: TV Monolith Item
+		Tooltip: ""
+	}
+
+	VHSPlayerItem: {
+		DisplayName: VHS Player Item
 		Tooltip: ""
 	}
 }
