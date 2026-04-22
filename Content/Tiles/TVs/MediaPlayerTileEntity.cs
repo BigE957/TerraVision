@@ -2,8 +2,10 @@
 using Microsoft.Xna.Framework.Graphics;
 using Newtonsoft.Json.Linq;
 using ReLogic.Content;
+using Stubble.Core.Classes;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
@@ -122,6 +124,21 @@ public class MediaPlayerEntity : ModTileEntity
         IsOn = tag.GetBool("isOn");
 
         ConnectedTVs.Clear();
+    }
+
+    public override void NetSend(BinaryWriter writer)
+    {
+        writer.Write(CurrentContentPath);
+        writer.Write(TileArea.X);
+        writer.Write(TileArea.Y);
+        writer.Write(IsOn);
+    }
+
+    public override void NetReceive(BinaryReader reader)
+    {
+        CurrentContentPath = reader.ReadString();
+        TileArea = new Rectangle(reader.ReadInt32(), reader.ReadInt32(), 2, 1);
+        IsOn = reader.ReadBoolean();
     }
 
     public override bool IsTileValidForEntity(int x, int y)

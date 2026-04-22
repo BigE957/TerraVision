@@ -81,7 +81,7 @@ public class TerraVisionConfig : ModConfig
 
     [DefaultValue(100)]
     [Range(0, 100)]
-    public int DefaultVolume { get; set; } = 100;
+    public byte DefaultVolume { get; set; } = 100;
 
     [DefaultValue(true)]
     public bool EnableCaptions { get; set; } = true;

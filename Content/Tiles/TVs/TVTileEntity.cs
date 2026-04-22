@@ -1,8 +1,10 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
+using Stubble.Core.Classes;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
@@ -22,7 +24,7 @@ public class TVTileEntity : ModTileEntity
     public static readonly Dictionary<int, (Point TileSize, Rectangle ScreenOffsets)> TileData = [];
 
     public bool IsOn { get; set; } = false;
-    public int Volume { get; set; } = 100;
+    public byte Volume { get; set; } = 100;
     public Point16 Size { get; set; }
 
     private bool _hasStartedChannel = false;
@@ -172,7 +174,7 @@ public class TVTileEntity : ModTileEntity
         CurrentChannel = tag.GetInt("channel");
         TilePosition = new Point16(tag.GetShort("posX"), tag.GetShort("posY"));
         IsOn = tag.GetBool("isOn");
-        Volume = tag.GetInt("volume");
+        Volume = tag.GetByte("volume");
         MediaPlayerPosition = new Point16(tag.GetShort("playerX"), tag.GetShort("playerY"));
 
         loadedIn = false;
@@ -272,5 +274,26 @@ public class TVTileEntity : ModTileEntity
     {
         var manager = ModContent.GetInstance<VideoChannelManager>();
         manager?.StopChannelIfUnused(CurrentChannel);
+    }
+
+    public override void NetSend(BinaryWriter writer)
+    {
+        writer.Write(CurrentChannel);
+        writer.Write(TilePosition.X);
+        writer.Write(TilePosition.Y);
+        writer.Write(IsOn);
+        writer.Write(Volume);
+        writer.Write(MediaPlayerPosition.X);
+        writer.Write(MediaPlayerPosition.Y);
+    }
+
+    public override void NetReceive(BinaryReader reader)
+    {
+        CurrentChannel = reader.ReadInt32();
+        TilePosition = new Point16(reader.ReadInt16(), reader.ReadInt16());
+        IsOn = reader.ReadBoolean();
+        Volume = reader.ReadByte();
+        MediaPlayerPosition = new Point16(reader.ReadInt16(), reader.ReadInt16());
+        
     }
 }
