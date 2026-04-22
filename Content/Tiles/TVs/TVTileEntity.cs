@@ -113,7 +113,7 @@ public class TVTileEntity : ModTileEntity
 
         if (!loadedIn)
         {
-            if (!TileEntity.TryGet<MediaPlayerEntity>(MediaPlayerPosition.X, MediaPlayerPosition.Y, out var entity))
+            if (!TryGet<MediaPlayerEntity>(MediaPlayerPosition.X, MediaPlayerPosition.Y, out var entity))
                 MediaPlayerPosition = Point16.Zero;
             else if (!entity.ConnectedTVs.Contains(Position))
                 entity.ConnectedTVs.Add(Position);
@@ -122,7 +122,8 @@ public class TVTileEntity : ModTileEntity
         }
 
         var manager = ModContent.GetInstance<VideoChannelManager>();
-        if (manager == null) return;
+        if (manager == null)
+            return;
 
         if(MediaPlayerPosition != Point16.Zero)
         {

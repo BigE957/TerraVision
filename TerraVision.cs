@@ -1,10 +1,6 @@
 using LibVLCSharp.Shared;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Terraria;
 using Terraria.ModLoader;
 using TerraVision.Core;
@@ -24,6 +20,11 @@ public class TerraVision : Mod
 
         if (!Main.dedServ)
             SetupLibVLC();
+    }
+
+    public override void PostSetupContent()
+    {
+        instance = this;
     }
 
     private static void SetupLibVLC()

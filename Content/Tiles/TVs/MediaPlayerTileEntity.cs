@@ -9,9 +9,7 @@ using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
-using TerraVision.Common;
 using TerraVision.Core.VideoPlayer;
-using TerraVision.UI.VideoPlayer;
 
 namespace TerraVision.Content.Tiles.TVs;
 
@@ -63,7 +61,10 @@ public class MediaPlayerEntity : ModTileEntity
             Kill(Position.X, Position.Y);
             return;
         }
-        
+    }
+
+    internal void ClientUpdate()
+    {
         player ??= new VideoPlayerCore(1280, 720);
 
         var manager = ModContent.GetInstance<VideoChannelManager>();
@@ -76,7 +77,7 @@ public class MediaPlayerEntity : ModTileEntity
             player.Resume();
 
         bool anyTVsOn = false;
-        foreach(Point16 p in ConnectedTVs)
+        foreach (Point16 p in ConnectedTVs)
         {
             TVTileEntity playerEntity = (TVTileEntity)TileEntity.ByPosition.GetValueOrDefault(p);
             if (playerEntity != null && playerEntity.IsOn)
@@ -102,7 +103,7 @@ public class MediaPlayerEntity : ModTileEntity
             StoredItem = -1;
             CurrentContentPath = string.Empty;
         }
-        
+
         player?.Update(Main.gameTimeCache);
     }
 
@@ -135,5 +136,22 @@ public class MediaPlayerEntity : ModTileEntity
             Item.NewItem(Item.GetSource_NaturalSpawn(), Position.ToWorldCoordinates(), StoredItem);
         player.Stop();
         player.Dispose();
+    }
+}
+
+public class MediaPlayerEntityManager : ModSystem
+{
+    public override void PostUpdateEverything()
+    {
+        if (Main.dedServ)
+            return;
+
+        foreach(TileEntity te in TileEntity.ByID.Values)
+        {
+            if (te is not MediaPlayerEntity mpe)
+                continue;
+
+            mpe.ClientUpdate();
+        }
     }
 }
